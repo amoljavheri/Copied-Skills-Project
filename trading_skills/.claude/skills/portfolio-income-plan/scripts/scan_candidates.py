@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # ABOUTME: Scans the S&P 100 large-cap universe for new wheel strategy candidates.
 # ABOUTME: Filters by market cap >$200B, scores on trend/IV/earnings/affordability.
+# ABOUTME: Applies top-down market regime filter (QQQ SMA200 + VXN) to adjust CSP delta targets.
 
 import argparse
 import json
@@ -8,10 +9,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+import yfinance as yf
+
 from trading_skills.earnings import get_earnings_info
 from trading_skills.fundamentals import get_fundamentals
 from trading_skills.scanner_bullish import compute_bullish_score
 from trading_skills.scanner_pmcc import analyze_pmcc
+from trading_skills.technicals import compute_raw_indicators
 
 # ── S&P 100 universe ─────────────────────────────────────────────────────────
 SP100_UNIVERSE = [
@@ -41,6 +45,74 @@ SP100_UNIVERSE = [
     # Other
     "TSM", "BABA",
 ]
+
+# ── Market regime (top-down filter) ──────────────────────────────────────────
+def get_market_regime() -> dict:
+    """Fetch QQQ SMA200 and VXN to determine top-down market regime.
+
+    Used to apply a global delta adjustment on top of per-stock trend scores.
+    Backtest result: bear market (QQQ < SMA200) → CSP assignment rate 2.3× higher.
+    """
+    result = {
+        "qqq_above_sma200": None,
+        "qqq_price": None,
+        "qqq_sma200": None,
+        "vxn": None,
+        "regime": "unknown",          # "bull" | "bear" | "unknown"
+        "vxn_regime": "unknown",      # "normal" | "high" | "extreme" | "unknown"
+        "recommended_delta_tier": "standard",  # "standard" | "reduce" | "skip"
+        "regime_note": "",
+    }
+    try:
+        qqq = yf.Ticker("QQQ")
+        df = qqq.history(period="12mo")
+        if not df.empty and len(df) >= 200:
+            raw = compute_raw_indicators(df)
+            qqq_price = float(df["Close"].iloc[-1])
+            sma200 = raw.get("sma200")
+            result["qqq_price"] = round(qqq_price, 2)
+            if sma200 is not None:
+                result["qqq_sma200"] = round(sma200, 2)
+                above = qqq_price > sma200
+                result["qqq_above_sma200"] = above
+                pct = ((qqq_price - sma200) / sma200) * 100
+                result["regime"] = "bull" if above else "bear"
+                result["regime_note"] = (
+                    f"QQQ ${qqq_price:.2f} {'above' if above else 'BELOW'} "
+                    f"SMA200 ${sma200:.2f} ({pct:+.1f}%)"
+                )
+    except Exception:
+        pass
+
+    try:
+        vxn = yf.Ticker("^VXN")
+        vxn_df = vxn.history(period="5d")
+        if not vxn_df.empty:
+            vxn_val = float(vxn_df["Close"].iloc[-1])
+            result["vxn"] = round(vxn_val, 1)
+            if vxn_val >= 35:
+                result["vxn_regime"] = "extreme"
+            elif vxn_val >= 25:
+                result["vxn_regime"] = "high"
+            else:
+                result["vxn_regime"] = "normal"
+    except Exception:
+        pass
+
+    # Combine regime + VXN into a delta recommendation
+    regime = result["regime"]
+    vxn_regime = result["vxn_regime"]
+    if vxn_regime == "extreme":
+        result["recommended_delta_tier"] = "skip"
+        result["regime_note"] += " | VXN≥35 → SKIP new CSPs"
+    elif regime == "bear" or vxn_regime == "high":
+        result["recommended_delta_tier"] = "reduce"
+        result["regime_note"] += " | Bear/high-VXN → reduce delta one tier"
+    else:
+        result["recommended_delta_tier"] = "standard"
+
+    return result
+
 
 # ── Trend classification ──────────────────────────────────────────────────────
 def classify_trend(score: float) -> str:
@@ -147,12 +219,13 @@ def analyze_symbol(
         beta = info.get("beta")
         pe = info.get("trailingPE")
 
-        # Trend analysis
-        bull_data = compute_bullish_score(symbol)
+        # Trend analysis — uses 12mo period to enable SMA200 scoring
+        bull_data = compute_bullish_score(symbol, period="12mo")
         bullish_score = bull_data["score"] if bull_data else 0.0
         price = bull_data["price"] if bull_data else 0.0
         trend_class = classify_trend(bullish_score)
         signals = bull_data.get("signals", []) if bull_data else []
+        above_sma200 = bull_data.get("above_sma200") if bull_data else None
 
         # IV via PMCC scanner (yfinance, no Tradier needed)
         pmcc_data = analyze_pmcc(symbol)
@@ -245,6 +318,7 @@ def analyze_symbol(
             "profit_margin_pct": round(profit_margin * 100, 1) if profit_margin else None,
             "trend_class": trend_class,
             "bullish_score": round(bullish_score, 1),
+            "above_sma200": above_sma200,
             "signals": signals,
             "iv_pct": iv_pct,
             "earnings_date": earnings_date,
@@ -294,19 +368,28 @@ def scan_candidates(
     owned_eligible = [s for s, q in owned_positions.items() if q >= 100]
     owned_partial = [s for s, q in owned_positions.items() if 0 < q < 100]
 
+    # ── Top-down market regime check (run before symbol scan) ────────────────
+    print("  Checking market regime (QQQ SMA200 + VXN)...", file=sys.stderr)
+    market_regime = get_market_regime()
+    regime_tier = market_regime.get("recommended_delta_tier", "standard")
+    if regime_tier == "skip":
+        print(
+            "  ⚠️  VXN EXTREME — recommending SKIP on all new CSPs",
+            file=sys.stderr,
+        )
+    elif regime_tier == "reduce":
+        print(
+            f"  ⚠️  {market_regime.get('regime_note', '')} — reducing delta tier",
+            file=sys.stderr,
+        )
+
     print(
         f"Screening {len(SP100_UNIVERSE)} S&P 100 symbols for "
         f"market cap ≥ ${market_cap_min_b:.0f}B...",
         file=sys.stderr,
     )
-    print(
-        f"  Already CC-eligible: {owned_eligible}",
-        file=sys.stderr,
-    )
-    print(
-        f"  Partial positions (top-up candidates): {owned_partial}",
-        file=sys.stderr,
-    )
+    print(f"  Already CC-eligible: {owned_eligible}", file=sys.stderr)
+    print(f"  Partial positions (top-up candidates): {owned_partial}", file=sys.stderr)
 
     results = []
     errors = []
@@ -337,6 +420,41 @@ def scan_candidates(
     eligible_symbols = [r for r in results if r["type"] == "OWNED_ELIGIBLE"]
     candidates = [r for r in results if r["type"] != "OWNED_ELIGIBLE"]
 
+    # Annotate each candidate with regime-adjusted delta recommendation
+    DELTA_TIERS = {
+        # (trend_class, regime_tier) → recommended CSP delta
+        "standard": {
+            "strong_bull": 0.20, "bull": 0.20, "neutral": 0.20,
+            "bear": 0.15, "strong_bear": 0.10,
+        },
+        "reduce": {
+            "strong_bull": 0.15, "bull": 0.15, "neutral": 0.12,
+            "bear": 0.10, "strong_bear": 0.08,
+        },
+        "skip": {
+            "strong_bull": None, "bull": None, "neutral": None,
+            "bear": None, "strong_bear": None,
+        },
+    }
+    tier_map = DELTA_TIERS.get(regime_tier, DELTA_TIERS["standard"])
+    for cand in candidates:
+        tc = cand.get("trend_class", "neutral")
+        suggested_delta = tier_map.get(tc)
+        cand["regime_adjusted_delta"] = suggested_delta
+        cand["regime_tier"] = regime_tier
+        # Downgrade recommendation to WATCH if skip regime
+        if regime_tier == "skip" and cand.get("recommendation") == "ADD":
+            cand["recommendation"] = "WATCH"
+            cand["risks"] = cand.get("risks", []) + [
+                "VXN≥35 extreme volatility — defer CSP entry until VXN < 30"
+            ]
+        # Flag bear-market stocks below their own SMA200
+        if cand.get("above_sma200") is False:
+            if not any("SMA200" in r for r in cand.get("risks", [])):
+                cand["risks"] = cand.get("risks", []) + [
+                    "Stock below own SMA200 — in individual bear market"
+                ]
+
     # Sort by wheel score descending, then alphabetically
     candidates.sort(key=lambda x: (-x["wheel_score"], x["symbol"]))
 
@@ -361,6 +479,7 @@ def scan_candidates(
 
     return {
         "as_of": datetime.now().strftime("%Y-%m-%d"),
+        "market_regime": market_regime,
         "market_cap_threshold_b": market_cap_min_b,
         "budget": {"max_per_csp": budget},
         "screened_count": len(SP100_UNIVERSE),

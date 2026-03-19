@@ -10,15 +10,20 @@ from trading_skills.earnings import get_earnings_info
 from trading_skills.technicals import compute_raw_indicators
 
 
-def compute_bullish_score(symbol: str, period: str = "3mo", ticker=None) -> dict | None:
+def compute_bullish_score(symbol: str, period: str = "12mo", ticker=None) -> dict | None:
     """Compute bullish trend score for a symbol.
 
     Score components (higher = more bullish):
     - Price above SMA20: +1, above SMA50: +1
+    - Price above SMA200: +1.5 (bull market confirmation)
+    - Price below SMA200: score HARD-CAPPED at 3.0 (bear market override)
     - RSI between 50-70: +1 (healthy bullish), 30-50: +0.5
     - MACD above signal: +1, histogram rising: +0.5
     - ADX > 25 with +DI > -DI: +1.5 (strong bullish trend)
     - Price momentum (% change over period): weighted contribution
+
+    NOTE: period defaults to "12mo" (was "3mo") to enable SMA200 calculation,
+    which requires at least 200 bars (~10 months of daily data).
     """
     try:
         ticker = ticker or yf.Ticker(symbol)
@@ -42,6 +47,7 @@ def compute_bullish_score(symbol: str, period: str = "3mo", ticker=None) -> dict
         # SMA analysis
         sma20_val = raw["sma20"]
         sma50_val = raw["sma50"]
+        sma200_val = raw["sma200"]
 
         if sma20_val is not None:
             if current_price > sma20_val:
@@ -58,6 +64,24 @@ def compute_bullish_score(symbol: str, period: str = "3mo", ticker=None) -> dict
             pct_from_sma50 = ((current_price - sma50_val) / sma50_val) * 100
         else:
             pct_from_sma50 = 0
+
+        # SMA200 — most important regime filter (backtest-validated)
+        # Bull market (price > SMA200): bonus points — confirms macro uptrend
+        # Bear market (price < SMA200): hard cap score at 3.0 (forces neutral/bear class)
+        #   This prevents a stock in a macro downtrend from appearing as "bull" on
+        #   short-term bounces, which would incorrectly suggest 0.20-0.30 delta CSPs.
+        above_sma200 = None
+        pct_from_sma200 = 0
+        if sma200_val is not None:
+            above_sma200 = current_price > sma200_val
+            pct_from_sma200 = ((current_price - sma200_val) / sma200_val) * 100
+            if above_sma200:
+                score += 1.5
+                signals.append(f"Above SMA200 — bull market (+{pct_from_sma200:.1f}%)")
+            else:
+                # Hard cap: cannot score higher than "neutral" (3.0) when below 200MA
+                score = min(score, 3.0)
+                signals.append(f"Below SMA200 — bear market ({pct_from_sma200:.1f}%) ⚠️")
 
         # RSI analysis
         rsi_val = raw["rsi"]
@@ -104,6 +128,10 @@ def compute_bullish_score(symbol: str, period: str = "3mo", ticker=None) -> dict
         momentum_bonus = min(max(period_return / 20, -1), 2)
         score += momentum_bonus
 
+        # Re-apply SMA200 hard cap after all other scoring (momentum can push above cap)
+        if sma200_val is not None and not above_sma200:
+            score = min(score, 3.0)
+
         return {
             "symbol": symbol,
             "score": round(score, 2),
@@ -113,6 +141,9 @@ def compute_bullish_score(symbol: str, period: str = "3mo", ticker=None) -> dict
             "period_return_pct": round(period_return, 2),
             "pct_from_sma20": round(pct_from_sma20, 2),
             "pct_from_sma50": round(pct_from_sma50, 2),
+            "pct_from_sma200": round(pct_from_sma200, 2),
+            "above_sma200": above_sma200,
+            "sma200": round(sma200_val, 2) if sma200_val else None,
             "rsi": round(rsi_val, 2) if rsi_val else None,
             "macd": round(macd_val, 4) if macd_val else None,
             "macd_signal": round(macd_signal, 4) if macd_signal else None,

@@ -72,15 +72,32 @@ uv run python .claude/skills/portfolio-income-plan/scripts/preflight_checks.py \
 ```
 
 This returns:
+- **Market regime** (`market_regime`): QQQ vs SMA200 + VXN level — top-down filter applied to all CSP decisions
 - **Earnings risks** per stock (BLOCK / SHORT_DTE_ONLY / SAFE + safe expiry dates)
-- **Per-stock trend** class (strong_bull / bull / neutral / bear / strong_bear)
+- **Per-stock trend** class (strong_bull / bull / neutral / bear / strong_bear) — now uses SMA200 hard cap
 - **Position sizing budget** (usable cash, max per CSP, max total CSPs)
 - **Existing options map** (to avoid duplicate strikes)
 - **CC-eligible stocks** (100+ shares only)
 
+### 🌍 Market Regime Rules (Backtest-Validated)
+
+The preflight now checks `market_regime.warning` first. Apply these rules BEFORE any strike selection:
+
+| QQQ vs SMA200 | VXN Level | Delta Adjustment | Action |
+|---|---|---|---|
+| Above SMA200 | < 25 (normal) | None — use standard | Proceed normally |
+| Above SMA200 | 25–35 (high) | Reduce one tier | e.g. 0.20 → 0.15 |
+| Below SMA200 | Any | Reduce one tier | e.g. 0.20 → 0.15 |
+| Below SMA200 | 25–35 (high) | Reduce two tiers | e.g. 0.20 → 0.10 |
+| Any | ≥ 35 (extreme) | **SKIP all new CSPs** | Hold cash, wait for VXN < 30 |
+
+> **Why this matters**: Backtest over 3 years showed CSP assignment rate jumps from **13% (bull)** to **30% (bear)** when QQQ is below its 200-day MA. A single bear-market assignment cluster can wipe out 10+ weeks of premium.
+
 Use these results to drive ALL subsequent decisions:
+- Check `market_regime.warning` first — if VXN ≥ 35, stop and hold cash
+- Apply delta tier adjustment from `market_regime.recommended_delta_tier`
 - Skip stocks with earnings risk = BLOCK
-- Use trend class as `--trend` parameter in extract_strikes.py
+- Use trend class as `--trend` parameter in extract_strikes.py (SMA200 hard cap already applied)
 - Respect budget limits when selecting CSPs
 - Don't suggest strikes that duplicate existing options
 
@@ -192,12 +209,23 @@ Strikes are selected by **delta range**, which automatically adjusts for each st
 | bear | 0.30 – 0.45 | Closer to money — more premium |
 | strong_bear | 0.35 – 0.50 | Near ATM — maximum premium |
 
-**Cash Secured Puts (CSP):**
+**Cash Secured Puts (CSP) — Standard Regime (QQQ > SMA200, VXN < 25):**
 | Trend | Delta Range | Effect |
 |-------|------------|--------|
 | strong_bull / bull | 0.20 – 0.30 | Standard OTM buffer |
 | neutral | 0.20 – 0.30 | Standard OTM buffer |
 | bear / strong_bear | 0.10 – 0.20 | Wider buffer — more protection |
+
+**CSP Delta Adjustments by Market Regime (apply on top of per-stock trend):**
+| Market Condition | Adjustment | Example |
+|---|---|---|
+| QQQ > SMA200, VXN < 25 | None (standard) | bull → 0.20–0.30 |
+| QQQ > SMA200, VXN 25–35 | Reduce one tier | bull → 0.15–0.20 |
+| QQQ < SMA200, VXN < 25 | Reduce one tier | bull → 0.15–0.20 |
+| QQQ < SMA200, VXN 25–35 | Reduce two tiers | bull → 0.10–0.15 |
+| VXN ≥ 35 | **SKIP — no new CSPs** | Wait for VXN < 30 |
+
+> SMA200 note: Per-stock trend scores now have a **hard cap of 3.0** (= "neutral") when the stock is below its own 200-day MA. This prevents a short-term bounce in a downtrending stock from generating an over-optimistic CSP recommendation.
 
 ### Understanding the Output
 
@@ -413,6 +441,9 @@ Options trading involves risk of loss. This is not financial advice.
 9. **Skip bad trades**: if extract_strikes returns SKIP, respect it — do not force a trade
 10. **Delta over % OTM**: always use `--trend` parameter for strike selection, not fixed percentages
 11. **Existing positions**: check preflight existing_options map — don't duplicate open strikes
+12. **Market regime first**: always check `market_regime` from preflight before selecting any CSP delta — backtest proves bear market doubles assignment risk
+13. **SMA200 hard cap**: per-stock trend is automatically capped at "neutral" (score ≤ 3.0) when stock is below its 200-day MA — prevents over-optimistic CSP entry on bear bounces
+14. **VXN ≥ 35**: skip ALL new CSPs regardless of individual stock trends — extreme volatility clusters create multi-week assignment streaks
 
 ---
 

@@ -57,6 +57,7 @@ def compute_raw_indicators(df: pd.DataFrame) -> dict:
         "rsi": None,
         "sma20": None,
         "sma50": None,
+        "sma200": None,
         "macd_line": None,
         "macd_signal": None,
         "macd_hist": None,
@@ -90,6 +91,13 @@ def compute_raw_indicators(df: pd.DataFrame) -> dict:
         val = sma50.iloc[-1]
         if pd.notna(val):
             result["sma50"] = float(val)
+
+    # SMA200 — requires at least 200 bars (need period="12mo" or longer)
+    sma200 = ta.sma(close, length=200)
+    if sma200 is not None and len(sma200) > 0:
+        val = sma200.iloc[-1]
+        if pd.notna(val):
+            result["sma200"] = float(val)
 
     # MACD
     macd = ta.macd(close)
