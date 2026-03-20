@@ -6,44 +6,83 @@ dependencies: ["trading-skills"]
 
 # Technical Analysis
 
-Compute technical indicators using pandas-ta. Supports multi-symbol analysis and earnings data.
+Compute technical indicators using pandas-ta. Supports multi-symbol analysis, trend classification, signal confluence, support/resistance levels, and volume analysis.
 
 ## Instructions
 
 > **Note:** If `uv` is not installed or `pyproject.toml` is not found, replace `uv run python` with `python` in all commands below.
 
 ```bash
-uv run python scripts/technicals.py SYMBOL [--period PERIOD] [--indicators INDICATORS] [--earnings]
+uv run python scripts/technicals.py SYMBOL [--period PERIOD] [--indicators INDICATORS] [--earnings] [--beta]
 ```
 
 ## Arguments
 
 - `SYMBOL` - Ticker symbol or comma-separated list (e.g., `AAPL` or `AAPL,MSFT,GOOGL`)
 - `--period` - Historical period: 1mo, 3mo, 6mo, 1y (default: 3mo)
-- `--indicators` - Comma-separated list: rsi,macd,bb,sma,ema,atr,adx (default: all)
+- `--indicators` - Comma-separated list: rsi,macd,bb,sma,ema,atr,adx,vwap,sr (default: all)
 - `--earnings` - Include earnings data (upcoming date + history)
+- `--beta` - Include beta vs SPY (requires extra data fetch)
 
 ## Output
 
 Single symbol returns:
-- `price` - Current price and recent change
-- `indicators` - Computed values for each indicator
-- `risk_metrics` - Volatility (annualized %) and Sharpe ratio
-- `signals` - Buy/sell signals based on indicator levels
+- `price` - Current price, change, change_pct
+- `indicators` - Computed values for each indicator (see below)
+- `signals` - Buy/sell signals with `strength` (0.0-1.0) and `volume_confirmed` flags
+- `trend` - Trend classification: `label` (strong_bull/bull/neutral/bear/strong_bear), `score`, `factors`
+- `confluence` - Signal alignment: `bullish_count`, `bearish_count`, `bias`, `strength`
+- `risk_metrics` - Volatility, Sharpe, Sortino, max drawdown, optional beta
 - `earnings` - Upcoming date and EPS history (if `--earnings`)
 
 Multiple symbols returns:
 - `results` - Array of individual symbol results
 
+## Indicators
+
+| Name | Key | Description |
+|------|-----|-------------|
+| RSI | `rsi` | RSI(14) + Stochastic RSI (K/D) |
+| MACD | `macd` | MACD line, signal, histogram |
+| Bollinger Bands | `bb` | Upper, lower, middle, bandwidth |
+| SMA | `sma` | SMA20, SMA50, SMA200 |
+| EMA | `ema` | EMA12, EMA26 |
+| ATR | `atr` | ATR(14) value and percent of price |
+| ADX | `adx` | ADX, +DI, -DI |
+| VWAP | `vwap` | Volume-weighted average price |
+| Support/Resistance | `sr` | Pivot points (S1/S2/R1/R2), swing highs/lows, nearest levels |
+| Volume | *(always)* | Relative volume, OBV trend, ROC(12) |
+
 ## Interpretation
 
+### Trend & Momentum
 - RSI > 70 = overbought, RSI < 30 = oversold
-- MACD crossover = momentum shift
-- Price near Bollinger Band = potential reversal
-- Golden cross (SMA20 > SMA50) = bullish
-- ADX > 25 = strong trend
+- Stochastic RSI > 80 = overbought, < 20 = oversold (more sensitive than RSI)
+- MACD crossover = momentum shift (stronger when above zero line)
+- Golden cross (SMA20 > SMA50) = bullish, Death cross = bearish
+- ADX > 25 = strong trend, +DI > -DI = bullish direction
+- ROC > 0 = positive momentum
+
+### Volume
+- Relative volume > 1.5 = unusual activity (confirms moves)
+- Relative volume < 0.5 = low conviction
+- OBV rising = volume supports uptrend
+
+### Support/Resistance
+- Pivot points: classic floor trader levels from prior day OHLC
+- Swing highs/lows: recent price extremes from bar structure
+- Nearest support/resistance: closest levels to current price
+
+### Risk
 - Sharpe ratio > 1 = good risk-adjusted returns, > 2 = excellent
-- Volatility (annualized) = standard deviation of returns scaled to annual basis
+- Sortino ratio > 1 = good (only penalizes downside volatility)
+- Max drawdown: worst peak-to-trough decline in period
+- Beta > 1 = more volatile than market, < 1 = less volatile
+
+### Signal Quality
+- `strength` (0.0-1.0): Conviction level (RSI 72 = 0.07 weak, RSI 95 = 0.83 strong)
+- `volume_confirmed`: Signal occurred on above-average volume (>1.5x)
+- `confluence.strength`: strong (3+ aligned signals), moderate (2), weak (0-1)
 
 ## Examples
 
@@ -54,11 +93,11 @@ uv run python scripts/technicals.py AAPL
 # Multiple symbols
 uv run python scripts/technicals.py AAPL,MSFT,GOOGL
 
-# With earnings data
-uv run python scripts/technicals.py NVDA --earnings
+# With earnings data and beta
+uv run python scripts/technicals.py NVDA --earnings --beta
 
 # Specific indicators only
-uv run python scripts/technicals.py TSLA --indicators rsi,macd
+uv run python scripts/technicals.py TSLA --indicators rsi,macd,sr
 ```
 
 ---

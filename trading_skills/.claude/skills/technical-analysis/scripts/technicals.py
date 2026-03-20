@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: CLI wrapper for technical indicator computation.
-# ABOUTME: Supports multi-symbol analysis and earnings data.
+# ABOUTME: Supports multi-symbol analysis, earnings data, and beta calculation.
 
 import argparse
 import json
@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--period", default="3mo", help="Historical period")
     parser.add_argument("--indicators", default=None, help="Comma-separated indicators")
     parser.add_argument("--earnings", action="store_true", help="Include earnings data")
+    parser.add_argument("--beta", action="store_true", help="Include beta vs SPY")
 
     args = parser.parse_args()
     indicators = args.indicators.split(",") if args.indicators else None
@@ -22,9 +23,13 @@ def main():
     symbols = [s.strip().upper() for s in args.symbol.split(",")]
 
     if len(symbols) == 1:
-        result = compute_indicators(symbols[0], args.period, indicators, args.earnings)
+        result = compute_indicators(
+            symbols[0], args.period, indicators, args.earnings, args.beta
+        )
     else:
-        result = compute_multi_symbol(symbols, args.period, indicators, args.earnings)
+        result = compute_multi_symbol(
+            symbols, args.period, indicators, args.earnings, args.beta
+        )
 
     print(json.dumps(result, indent=2))
 
