@@ -536,7 +536,19 @@ def main() -> None:
         top_n=args.top_n,
         include_piotroski=args.piotroski,
     )
-    print(json.dumps(result, indent=2))
+    import numpy as np
+
+    class _Encoder(json.JSONEncoder):
+        def default(self, o):
+            if isinstance(o, (np.bool_,)):
+                return bool(o)
+            if isinstance(o, (np.integer,)):
+                return int(o)
+            if isinstance(o, (np.floating,)):
+                return float(o)
+            return super().default(o)
+
+    print(json.dumps(result, indent=2, cls=_Encoder))
 
 
 if __name__ == "__main__":
