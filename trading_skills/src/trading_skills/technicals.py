@@ -95,6 +95,16 @@ def compute_raw_indicators(df: pd.DataFrame) -> dict:
         "obv": None,
         "obv_sma20": None,
         "relative_volume": None,
+        # Bollinger Bands
+        "bb_lower": None,
+        "bb_mid": None,
+        "bb_upper": None,
+        "bb_bandwidth": None,
+        # ATR
+        "atr": None,
+        # Trend consistency & breakout
+        "days_above_sma20": None,
+        "high_20d": None,
     }
 
     if df.empty or "Close" not in df.columns:
@@ -200,6 +210,48 @@ def compute_raw_indicators(df: pd.DataFrame) -> dict:
             cur_val = volume.iloc[-1]
             if pd.notna(avg_val) and avg_val > 0 and pd.notna(cur_val):
                 result["relative_volume"] = float(cur_val / avg_val)
+
+    # Bollinger Bands (20, 2)
+    bb = ta.bbands(close, length=20, std=2)
+    if bb is not None and len(bb) > 0:
+        lower = bb.iloc[-1, 0]
+        mid = bb.iloc[-1, 1]
+        upper = bb.iloc[-1, 2]
+        if pd.notna(lower):
+            result["bb_lower"] = float(lower)
+        if pd.notna(mid):
+            result["bb_mid"] = float(mid)
+        if pd.notna(upper):
+            result["bb_upper"] = float(upper)
+        if pd.notna(lower) and pd.notna(mid) and pd.notna(upper) and mid > 0:
+            result["bb_bandwidth"] = float((upper - lower) / mid * 100)
+
+    # ATR (14-period)
+    if "High" in df.columns and "Low" in df.columns:
+        atr = ta.atr(df["High"], df["Low"], close, length=14)
+        if atr is not None and len(atr) > 0:
+            val = atr.iloc[-1]
+            if pd.notna(val):
+                result["atr"] = float(val)
+
+    # Trend consistency: count of last 20 days where close > SMA20
+    sma20_for_consistency = ta.sma(close, length=20)
+    if sma20_for_consistency is not None and len(sma20_for_consistency) >= 20:
+        last_20_close = close.iloc[-20:]
+        last_20_sma = sma20_for_consistency.iloc[-20:]
+        valid = last_20_sma.notna()
+        if valid.sum() > 0:
+            above = (last_20_close[valid] > last_20_sma[valid]).sum()
+            result["days_above_sma20"] = int(above)
+
+    # 20-day rolling high (for breakout detection)
+    if len(close) >= 20:
+        high_col = df["High"] if "High" in df.columns else close
+        rolling_high = high_col.rolling(20).max()
+        if rolling_high is not None and len(rolling_high) > 0:
+            val = rolling_high.iloc[-1]
+            if pd.notna(val):
+                result["high_20d"] = float(val)
 
     return result
 
