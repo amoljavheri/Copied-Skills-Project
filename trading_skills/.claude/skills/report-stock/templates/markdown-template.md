@@ -19,6 +19,9 @@ Generated: {generated}
 ```markdown
 ## Recommendation: {recommendation.recommendation}
 
+**Conviction Score: {conviction_score.total} / 10** — {conviction_score.verdict}
+Signal Alignment: {conviction_score.signal_alignment}
+
 **Strengths:**
 - {strength 1}
 - {strength 2}
@@ -43,23 +46,44 @@ Use `recommendation.recommendation_level` to label: "positive" = BUY, "neutral" 
 | Enterprise Value | Format as `$X.XB` or `$X.XM` |
 | Beta | 2 decimals |
 
-### 4. Trend Analysis
+### 4. Market Context
+
+```markdown
+## 🌍 Market Context
 
 | Indicator | Value | Signal |
 |-----------|-------|--------|
-| Bullish Score | `X.XX / 8` | Strong(≥6)/Moderate(≥4)/Neutral(≥2)/Bearish(<2) |
+| SPY Trend | bullish/bearish/sideways | {emoji} |
+| SPY Price | $X.XX | Above/Below SMA50 |
+| VIX Regime | low/normal/elevated/high | Risk level |
+| Sector ({sector_etf}) | bullish/bearish/sideways | Sector trend |
+```
+
+If `market_context` is null, display "Market context unavailable".
+
+### 5. Trend Analysis
+
+| Indicator | Value | Signal |
+|-----------|-------|--------|
+| Bullish Score | `X.XX / 11.5` (normalized: `X.XXX`) | Strong(≥0.52)/Moderate(≥0.35)/Weak |
+| Trend Stage | early/mid/extended/below | Stage classification |
 | Price | `$X.XX` | - |
-| 3-Month Return | `±X.X%` | Bullish/Bearish |
+| Period Return | `±X.X%` | Bullish/Bearish |
 | vs SMA20 | `±X.X%` | Above/Below |
 | vs SMA50 | `±X.X%` | Above/Below |
+| vs SMA200 | `±X.X%` | Above/Below — bull/bear market |
 | RSI | `X.X` | Overbought(>70)/Oversold(<30)/Bullish(50-70)/Neutral |
 | MACD | `X.XX vs Signal X.XX` | Bullish/Bearish |
 | ADX | `X.X` | Strong(≥40)/Moderate(25-40)/Weak(<25) Trend |
+| Volume Confirmed | Yes/No | RVOL confirmation |
+| Breakout Signal | Yes/No | 20-day high breakout |
+| OBV Trend | rising/falling | Accumulation/Distribution |
+| Trend Consistency | `X/20 days` | Days above SMA20 |
 | Next Earnings | `YYYY-MM-DD` | `BMO`/`AMC` |
 
 **Signals:** List `trend_analysis.signals` as bullet points.
 
-### 5. Fundamental Analysis
+### 6. Fundamental Analysis
 
 #### Valuation
 
@@ -100,7 +124,7 @@ Use `recommendation.recommendation_level` to label: "positive" = BUY, "neutral" 
 
 Up to 8 quarters.
 
-### 6. Piotroski F-Score
+### 7. Piotroski F-Score
 
 **Score: X/9** ({piotroski.interpretation})
 
@@ -116,85 +140,106 @@ Up to 8 quarters.
 | 8. Higher Gross Margin | PASS/FAIL | Recent: X, Prev: Y |
 | 9. Higher Asset Turnover | PASS/FAIL | Recent: X, Prev: Y |
 
-### 7. Overall Bullish Score
+### 8. Overall Conviction Score
 
 ```markdown
-## 🎯 Overall Bullish Score: X / 10  —  [Verdict]
+## 🎯 Overall Conviction Score: X.X / 10  —  [Verdict]
 
-| Component | Score | Signal |
-|-----------|-------|--------|
-| Trend (bullish score X/8) | X/3 | Strong/Moderate/Weak |
-| ADX strength | X/1 | Trend confirmed / No trend |
-| RSI zone | X/1 | Bullish / Neutral / Overbought |
-| Piotroski F-Score (X/9) | X/1 | Strong / Moderate / Weak |
-| Valuation (Fwd P/E) | X/1 | Attractive / Premium |
-| PMCC viability (X/11) | X/1 | Excellent / Good / Poor |
-| Analyst sentiment | X/1 | Bullish / Neutral / Bearish |
-| News/momentum | X/1 | Positive / Negative |
-| **TOTAL** | **X/10** | |
+Signal Alignment: aligned / mixed / conflicting
 ```
 
+If conflicting, list `conviction_score.conflicts` as bullet points.
+
+#### Component Breakdown
+
+| Component | Score | Max | Signal |
+|-----------|-------|-----|--------|
+| Trend (bullish score) | X.X | 3.0 | detail |
+| ADX strength | X.X | 0.5 | detail |
+| RSI zone | X.X | 1.0 | detail |
+| Volume/momentum | X.X | 1.0 | detail |
+| Piotroski F-Score | X.X | 1.0 | detail |
+| Valuation (Fwd P/E) | X.X | 1.0 | detail |
+| PMCC viability | X.X | 1.5 | detail |
+| Market regime | X.X | 1.0 | detail |
+| **TOTAL** | **X.X** | **10** | |
+
+#### Dimensional Summary
+
+| Dimension | Score | Max | Pct |
+|-----------|-------|-----|-----|
+| 📈 Technical | X.X | 5.5 | XX% |
+| 📊 Fundamental | X.X | 2.0 | XX% |
+| 🎯 Strategy | X.X | 1.5 | XX% |
+| 🌍 Market | X.X | 1.0 | XX% |
+
 Verdict labels:
-- 1–3: 🔴 Bearish — Avoid
-- 4–5: 🟡 Neutral — Watch
-- 6–7: 🟢 Moderately Bullish — Favorable
-- 8–9: 🚀 Strong Bull — High Conviction
+- 0–1.99: ⚠️ Strong Bear — Avoid
+- 2–3.99: 🔴 Bearish — Avoid/Wait
+- 4–5.99: 🟡 Neutral — Watch
+- 6–7.99: 🟢 Moderately Bullish — Favorable
+- 8–9.99: 🚀 Strong Bull — High Conviction
 - 10: ⚡ Exceptional — Rare Setup
 
-### 8. LEAP Call Scenarios
+### 9. LEAP Call Scenarios
 
 ```markdown
 ## 📈 LEAP Call Scenarios
 
-📊 *Source: Tradier live option chain — real prices*
+📊 *Source: {data_sources.options} option chain — {real/estimated} prices*
 
-**LEAP Details (Real Data):**
+**LEAP Details:**
 - Strike: $X | Expiry: YYYY-MM-DD | **Bid: $XX.XX / Ask: $XX.XX / Mid: $XX.XX** (~$X,XXX per contract)
-- Delta: 0.XX | IV: XX% | Monthly Theta Drag: $X.XX/month (real theta × 30)
+- Delta: 0.XX | IV: XX% | Monthly Theta Drag: $X.XX/month
 
 **Scenario Analysis (1 Month)**
 
-| Stock Move | Target Price | LEAP Est. Value | P&L | Return % |
-|-----------|-------------|----------------|-----|---------|
-| -10% | $XXX | ~$XX | -$XX | -XX% 🔴 |
-| Flat (0%) | $XXX | ~$XX | -$X | -X% 🟡 |
-| +5% | $XXX | ~$XX | +$X | +X% 🟡 |
-| +10% | $XXX | ~$XX | +$XX | +XX% 🟢 |
-| +20% | $XXX | ~$XX | +$XX | +XX% 🚀 |
-| +30% | $XXX | ~$XX | +$XX | +XX% 🚀 |
+| Stock Move | Target Price | LEAP Est. Value | P&L | Return % | Confidence |
+|-----------|-------------|----------------|-----|---------|------------|
+| -10% | $XXX | ~$XX | -$XX | -XX% 🔴 | low |
+| Flat (0%) | $XXX | ~$XX | -$X | -X% 🟡 | high |
+| +5% | $XXX | ~$XX | +$X | +X% 🟡 | high |
+| +10% | $XXX | ~$XX | +$XX | +XX% 🟢 | moderate |
+| +20% | $XXX | ~$XX | +$XX | +XX% 🚀 | low |
+| +30% | $XXX | ~$XX | +$XX | +XX% 🚀 | low |
 
-*Values estimated using: `LEAP_cost + (delta × price_change) − monthly_theta`*
+*{model_note}*
 
 **Break-even**: Stock needs to rise ~X.X% in 30 days to cover theta drag
-**Prob. of +30% LEAP gain in 1 month**: ~XX% (based on real IV = XX%)
-
-**Best entry strategy**: [e.g., "Buy on pullback to $XXX support for better risk/reward"]
+**Prob. of +30% LEAP gain in 1 month**: ~XX%
 ```
 
-### 9. Cash Secured Put (CSP) Analysis
+### 10. Cash Secured Put (CSP) Analysis
 
 ```markdown
 ## 💰 Cash Secured Put Analysis
 
-📊 *Source: Tradier live option chain — real bid/ask*
+📊 *Source: {data_sources.options} option chain — {real/estimated} bid/ask*
 
 **CSP Suitability**: ✅ Good / ⚠️ Caution / ❌ Avoid
-*Reason: [e.g., "IV at XX% provides good premium; stock in uptrend; happy to own at XX% discount"]*
+*Reason: {suitability.reason}*
+{flags as bullet points if any}
 
 **Expiry**: YYYY-MM-DD (~XX DTE)
 
 | Tier | Strike | Bid | Ask | Mid Premium | Delta | IV | Ann. Yield | Prob. Profit | Capital |
 |------|--------|-----|-----|-------------|-------|----|-----------|-------------|---------|
-| 🛡️ Conservative | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
-| ⚖️ Balanced | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
-| 🎯 Aggressive | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
+| 🛡️ Conservative (δ~0.15) | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
+| ⚖️ Balanced (δ~0.25) | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
+| 🎯 Aggressive (δ~0.35) | $XXX | $X.XX | $X.XX | $X.XX | 0.XX | XX% | XX% | XX% | $XX,XXX |
+```
+
+If `support_context` is present on a tier, add:
+```markdown
+**Support Context**: Strike vs SMA50: above/below | Strike vs SMA200: above/below
+Nearest support: $XX.XX (X.X% below strike)
+```
 
 **Recommended strike**: $XXX (Balanced) — [reason]
 **Assignment scenario**: If assigned, cost basis = $XXX − $X.XX premium = **$XXX.XX**
 **Next step if assigned**: Sell covered calls (wheel strategy) at $XXX strike
-```
 
-### 10. PMCC Viability
+### 11. PMCC Viability
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
@@ -222,9 +267,10 @@ Verdict labels:
 | ROI at Max Profit | `X.X%` |
 | Capital Required | `$X,XXX.XX` |
 
-### 8. Option Spread Strategies
+### 12. Option Spread Strategies
 
 **Expiry:** {spread_strategies.expiry} ({spread_strategies.dte} days)
+**Source:** {spread_strategies.source}
 
 #### Strategy Summary
 
@@ -240,13 +286,21 @@ Verdict labels:
 
 For each strategy, show legs, cost, breakeven, max profit/loss.
 
-### 9. Investment Summary
+### 13. Investment Summary
 
 **Strengths:**
-- (from recommendation.strengths)
+- (from conviction_score.strengths)
 
 **Risk Factors:**
-- (from recommendation.risks)
+- (from conviction_score.risks)
+
+**Data Sources:**
+- Technicals: {data_sources.technicals}
+- Fundamentals: {data_sources.fundamentals}
+- Options: {data_sources.options}
+- Quote: {data_sources.quote}
+- Definitive Price: ${data_sources.definitive_price}
+{if price_discrepancy_pct: "⚠️ Price discrepancy: X.X% between sources"}
 
 ### Footer
 
@@ -263,3 +317,4 @@ Options trading involves significant risk of loss. Past performance is not indic
 - Ratios: 1 decimal for P/E, 2 decimals for delta/beta
 - Scores: `X / max` format
 - Missing data: "N/A" or "-"
+- Conviction score components: use the `detail` field from each component dict

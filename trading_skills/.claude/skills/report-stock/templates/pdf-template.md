@@ -39,6 +39,8 @@ Color-coded box based on `recommendation.recommendation_level`:
 ```
 ┌─────────────────────────────────────────────────┐
 │ RECOMMENDATION: [recommendation.recommendation] │  (white text on colored bg)
+│ CONVICTION SCORE: X.X / 10 — [verdict]         │  (large, white text)
+│ Signal Alignment: aligned/mixed/conflicting     │
 ├─────────────────────────────────────────────────┤
 │ • [strength 1]                                  │  (lighter tinted bg)
 │ • [strength 2]                                  │
@@ -61,26 +63,41 @@ Color-coded box based on `recommendation.recommendation_level`:
 | Enterprise Value | Format as `$X.XB` |
 | Beta | `company.beta` (2 decimals) |
 
-### 4. Trend Analysis Table
+### 4. Market Context Table
 
 | Indicator | Value | Signal |
 |-----------|-------|--------|
-| Bullish Score | `X.XX / 8` | Strong/Moderate/Weak Bullish |
+| SPY Trend | bullish/bearish/sideways | Emoji indicator |
+| SPY Price | $X.XX | Above/Below SMA50 |
+| VIX Regime | low/normal/elevated/high | Risk level |
+| Sector ETF | XLK/XLV/etc | Sector trend |
+
+### 5. Trend Analysis Table
+
+| Indicator | Value | Signal |
+|-----------|-------|--------|
+| Bullish Score | `X.XX / 11.5` (normalized: `X.XXX`) | Strong(≥0.52)/Moderate(≥0.35)/Weak |
+| Trend Stage | early/mid/extended/below | Classification |
 | Price | `$X.XX` | - |
-| 3-Month Return | `±X.X%` | Bullish/Bearish |
+| Period Return | `±X.X%` | Bullish/Bearish |
 | vs SMA20 | `±X.X%` | Above/Below |
 | vs SMA50 | `±X.X%` | Above/Below |
+| vs SMA200 | `±X.X%` | Above/Below — bull/bear market |
 | RSI | `X.X` | Overbought(>70)/Oversold(<30)/Bullish(50-70)/Neutral |
 | MACD | `X.XX vs Signal X.XX` | Bullish/Bearish |
-| ADX | `X.X` | Strong(>40)/Moderate(25-40)/Weak(<25) Trend |
+| ADX | `X.X` | Strong(≥40)/Moderate(25-40)/Weak(<25) Trend |
+| Volume Confirmed | Yes/No | RVOL confirmation |
+| Breakout Signal | Yes/No | 20-day high breakout |
+| OBV Trend | rising/falling | Accumulation/Distribution |
+| Trend Consistency | `X/20 days` | Days above SMA20 |
 | Next Earnings | `YYYY-MM-DD` | `BMO`/`AMC` |
 
 **Signal interpretations:**
-- Bullish Score: ≥6 = "Strong Bullish", ≥4 = "Moderate Bullish", ≥2 = "Neutral", <2 = "Bearish"
+- Normalized Score: ≥0.52 = "Strong Bullish", ≥0.35 = "Moderate", ≥0.17 = "Neutral", <0.17 = "Bearish"
 - RSI: >70 = "Overbought (caution)", <30 = "Oversold", ≥50 = "Bullish", <50 = "Neutral"
 - ADX: ≥40 = "Strong Trend", ≥25 = "Moderate Trend", <25 = "Weak/No Trend"
 
-### 5. Fundamental Analysis (Page 2)
+### 6. Fundamental Analysis (Page 2)
 
 #### Valuation Metrics Table
 
@@ -120,7 +137,7 @@ Color-coded box based on `recommendation.recommendation_level`:
 | YYYY-MM-DD | $X.XX | $X.XX | ±X.X% |
 | ... (up to 8 quarters) |
 
-### 6. Piotroski F-Score Section
+### 7. Piotroski F-Score Section
 
 Header: `Piotroski F-Score: X/9 (interpretation)`
 
@@ -136,7 +153,79 @@ Header: `Piotroski F-Score: X/9 (interpretation)`
 | 8. Higher Gross Margin | PASS/FAIL | Recent: X, Prev: Y |
 | 9. Higher Asset Turnover | PASS/FAIL | Recent: X, Prev: Y |
 
-### 7. PMCC Viability Table
+### 8. Overall Conviction Score (Blue accent box)
+
+```
+┌─ CONVICTION SCORE: X.X / 10 — [Verdict] ─────────────┐
+│ Signal Alignment: aligned/mixed/conflicting            │
+│                                                        │
+│ Component          | Score | Max  | Detail             │
+│ ─────────────────  | ───── | ──── | ──────             │
+│ Trend              | X.X   | 3.0  | from components    │
+│ ADX strength       | X.X   | 0.5  | from components    │
+│ RSI zone           | X.X   | 1.0  | from components    │
+│ Volume/momentum    | X.X   | 1.0  | from components    │
+│ Piotroski F-Score  | X.X   | 1.0  | from components    │
+│ Valuation          | X.X   | 1.0  | from components    │
+│ PMCC viability     | X.X   | 1.5  | from components    │
+│ Market regime      | X.X   | 1.0  | from components    │
+│ ─────────────────  | ───── | ──── |                    │
+│ TOTAL              | X.X   | 10   |                    │
+│                                                        │
+│ Dimensions:                                            │
+│ Technical: X.X/5.5 | Fundamental: X.X/2.0             │
+│ Strategy: X.X/1.5  | Market: X.X/1.0                  │
+│                                                        │
+│ Conflicts: (list if any)                               │
+└────────────────────────────────────────────────────────┘
+```
+
+Verdict colors: 0-3.99 Red, 4-5.99 Yellow, 6-7.99 Green, 8+ Dark Green
+
+### 9. LEAP Call Scenarios
+
+```
+┌─ LEAP CALL SCENARIOS ─────────────────────────────────┐
+│ Source: {data_sources.options} — {real/estimated}      │
+│                                                        │
+│ Strike: $X | Expiry: YYYY-MM-DD                       │
+│ Bid: $XX.XX | Ask: $XX.XX | Mid: $XX.XX              │
+│ Delta: 0.XX | Monthly Theta: $X.XX                    │
+│                                                        │
+│ Move    | Target  | Est Value | P&L    | Return | Conf│
+│ ─────── | ─────── | ───────── | ────── | ────── | ────│
+│ -10%    | $XXX    | ~$XX      | -$XX   | -XX%   | low │
+│ Flat    | $XXX    | ~$XX      | -$X    | -X%    | high│
+│ +5%     | $XXX    | ~$XX      | +$X    | +X%    | high│
+│ +10%    | $XXX    | ~$XX      | +$XX   | +XX%   | mod │
+│ +20%    | $XXX    | ~$XX      | +$XX   | +XX%   | low │
+│ +30%    | $XXX    | ~$XX      | +$XX   | +XX%   | low │
+│                                                        │
+│ Break-even: ~X.X% move in 30 days                     │
+│ Prob +30% gain in 1mo: ~XX%                           │
+└────────────────────────────────────────────────────────┘
+```
+
+### 10. Cash Secured Put (CSP) Analysis
+
+```
+┌─ CSP ANALYSIS ─ Suitability: Good/Caution/Avoid ─────┐
+│ Source: {data_sources.options} — {real/estimated}      │
+│ Reason: {suitability.reason}                          │
+│ Expiry: YYYY-MM-DD (~XX DTE)                          │
+│                                                        │
+│ Tier          | Strike | Mid  | Delta | Ann.Yld | P.P.│
+│ ───────────── | ────── | ──── | ───── | ─────── | ────│
+│ Conservative  | $XXX   | $X.X | 0.15  | XX%     | XX% │
+│ Balanced      | $XXX   | $X.X | 0.25  | XX%     | XX% │
+│ Aggressive    | $XXX   | $X.X | 0.35  | XX%     | XX% │
+│                                                        │
+│ Recommended: $XXX (Balanced)                          │
+│ If assigned: cost basis = $XXX.XX                     │
+└────────────────────────────────────────────────────────┘
+```
+
+### 11. PMCC Viability Table
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
@@ -153,7 +242,7 @@ Header: `Piotroski F-Score: X/9 (interpretation)`
 | Short Bid/Ask | `$X.XX / $X.XX` | - |
 | Short Spread | `X.X%` | Good(<10%)/Acceptable(10-20%)/Wide(>20%) |
 
-### 8. PMCC Trade Metrics Table (Blue accent header)
+### 12. PMCC Trade Metrics Table (Blue accent header)
 
 | Metric | Value |
 |--------|-------|
@@ -164,7 +253,7 @@ Header: `Piotroski F-Score: X/9 (interpretation)`
 | ROI at Max Profit | `X.X%` |
 | Capital Required | `$X,XXX.XX` |
 
-### 9. Option Spread Strategies Section (Blue accent header)
+### 13. Option Spread Strategies Section (Blue accent header)
 
 Header: `Option Spread Strategies - Expiry: YYYY-MM-DD (X days)`
 
@@ -243,7 +332,7 @@ Data from `spread_strategies`:
 - Straddle/Strangle: Expect large move, direction uncertain
 - Iron Condor: Range-bound, collect premium
 
-### 10. Investment Summary (Final Page)
+### 14. Investment Summary (Final Page)
 
 #### Strengths Box (Green)
 ```
@@ -261,7 +350,19 @@ Data from `spread_strategies`:
 └─────────────────────────────────────────────────┘
 ```
 
-### 11. Footer (All Pages)
+### 15. Data Sources Box (Light gray)
+```
+┌─ DATA SOURCES ─────────────────────────────────┐
+│ Technicals: {data_sources.technicals}          │
+│ Fundamentals: {data_sources.fundamentals}      │
+│ Options: {data_sources.options}                │
+│ Quote: {data_sources.quote}                    │
+│ Definitive Price: ${definitive_price}          │
+│ {if price_discrepancy: "⚠️ X.X% discrepancy"} │
+└─────────────────────────────────────────────────┘
+```
+
+### 16. Footer (All Pages)
 ```
 ─────────────────────────────────────── (1pt line, #BDC3C7)
 This analysis is for informational purposes only and does not
