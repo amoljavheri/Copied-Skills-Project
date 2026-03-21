@@ -1,121 +1,25 @@
 #!/usr/bin/env python3
 # ABOUTME: Pre-flight checks before fetching option chains for income plan.
 # ABOUTME: Returns earnings risks, per-stock trends, position sizing budget, and existing options.
-# ABOUTME: Includes market regime check (QQQ vs SMA200) and VXN volatility regime for CSP delta scaling.
+# ABOUTME: Includes market regime (QQQ vs SMA200) and VXN volatility regime.
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 
-import yfinance as yf
+# Shared utilities (classify_trend, market regime, etc.)
+sys.path.insert(0, os.path.dirname(__file__))
+from shared_utils import (  # noqa: E402
+    classify_trend,
+    compute_market_regime,
+    compute_stress_test,
+    enforce_sma200_cap,
+)
 
 from trading_skills.earnings import get_earnings_info
 from trading_skills.scanner_bullish import compute_bullish_score
-from trading_skills.technicals import compute_raw_indicators
-
-
-def classify_trend(score: float) -> str:
-    """Map bullish score (0-8) to trend class."""
-    if score >= 6.0:
-        return "strong_bull"
-    elif score >= 4.0:
-        return "bull"
-    elif score >= 2.0:
-        return "neutral"
-    elif score >= 1.0:
-        return "bear"
-    else:
-        return "strong_bear"
-
-
-def check_market_regime() -> dict:
-    """Check top-down market regime using QQQ vs SMA200 and VXN volatility level.
-
-    Backtest evidence (3-year QQQ CSP study):
-      - QQQ > SMA200 (bull): assignment rate 13.2%
-      - QQQ < SMA200 (bear): assignment rate 30.0%  ← 2.3× worse
-      - VXN > 25: strikes further OTM but assignment clusters triple in frequency
-
-    Returns recommended CSP delta adjustment to apply on top of per-stock trend class.
-    """
-    result = {
-        "qqq_price": None,
-        "qqq_sma200": None,
-        "qqq_above_sma200": None,
-        "vxn": None,
-        "market_regime": "unknown",
-        "csp_delta_adjustment": "none",
-        "csp_recommendation": "",
-        "warning": None,
-    }
-    try:
-        # QQQ vs 200MA
-        qqq = yf.Ticker("QQQ")
-        df = qqq.history(period="12mo")
-        if not df.empty and len(df) >= 200:
-            raw = compute_raw_indicators(df)
-            qqq_price = float(df["Close"].iloc[-1])
-            sma200 = raw.get("sma200")
-            result["qqq_price"] = round(qqq_price, 2)
-            if sma200 is not None:
-                result["qqq_sma200"] = round(sma200, 2)
-                above = qqq_price > sma200
-                result["qqq_above_sma200"] = above
-                pct = ((qqq_price - sma200) / sma200) * 100
-                if above:
-                    result["market_regime"] = "bull"
-                    result["csp_recommendation"] = (
-                        f"QQQ {pct:+.1f}% above SMA200 — bull market. "
-                        "Use standard delta targets per stock trend."
-                    )
-                else:
-                    result["market_regime"] = "bear"
-                    result["csp_delta_adjustment"] = "reduce_one_tier"
-                    result["warning"] = (
-                        f"⚠️ QQQ {pct:+.1f}% BELOW SMA200 — BEAR MARKET. "
-                        "CSP assignment risk is 2.3× higher than normal. "
-                        "Reduce delta by one tier (e.g. 0.20→0.15, 0.15→0.10). "
-                        "Consider skipping new CSPs on weak/bear-trend stocks entirely."
-                    )
-                    result["csp_recommendation"] = result["warning"]
-
-        # VXN volatility regime
-        vxn = yf.Ticker("^VXN")
-        vxn_df = vxn.history(period="5d")
-        if not vxn_df.empty:
-            vxn_val = float(vxn_df["Close"].iloc[-1])
-            result["vxn"] = round(vxn_val, 1)
-            if vxn_val >= 35:
-                vxn_warning = (
-                    f"⚠️⚠️ VXN={vxn_val:.0f} — EXTREME VOLATILITY (≥35). "
-                    "Skip ALL new CSPs. Wait for VXN to fall below 30."
-                )
-                result["vxn_regime"] = "extreme"
-                result["vxn_warning"] = vxn_warning
-                if result["warning"]:
-                    result["warning"] += " | " + vxn_warning
-                else:
-                    result["warning"] = vxn_warning
-            elif vxn_val >= 25:
-                vxn_warning = (
-                    f"⚠️ VXN={vxn_val:.0f} — HIGH VOLATILITY (25–35). "
-                    "Reduce delta one tier further. Use half-size positions."
-                )
-                result["vxn_regime"] = "high"
-                result["vxn_warning"] = vxn_warning
-                if result["warning"]:
-                    result["warning"] += " | " + vxn_warning
-                else:
-                    result["warning"] = vxn_warning
-            else:
-                result["vxn_regime"] = "normal"
-                result["vxn_warning"] = None
-
-    except Exception as e:
-        result["error"] = str(e)
-
-    return result
 
 
 def check_earnings(symbols: list[str]) -> dict:
@@ -173,9 +77,14 @@ def check_trends(symbols: list[str]) -> dict:
             data = compute_bullish_score(sym, period="12mo")
             if data:
                 score = data.get("score", 0)
+                above_sma200 = data.get("above_sma200")
+                trend_class = classify_trend(score)
+                # SMA200 hard cap (Rule 13): prevent bullish trend on stocks below SMA200
+                trend_class = enforce_sma200_cap(trend_class, above_sma200)
                 results[sym] = {
                     "score": round(score, 1),
-                    "class": classify_trend(score),
+                    "class": trend_class,
+                    "above_sma200": above_sma200,
                     "signals": data.get("signals", []),
                 }
             else:
@@ -228,7 +137,7 @@ def run_preflight(portfolio_data: dict) -> dict:
 
     # 0. Market regime check (top-down filter — must run first)
     print("  Checking market regime (QQQ SMA200 + VXN)...", file=sys.stderr)
-    market_regime = check_market_regime()
+    market_regime = compute_market_regime()
 
     # 1. Earnings check
     print("  Checking earnings dates...", file=sys.stderr)
@@ -251,6 +160,10 @@ def run_preflight(portfolio_data: dict) -> dict:
         if s.get("quantity", 0) >= 100
     ]
 
+    # 6. Stress test — worst-case simultaneous assignment scenario
+    print("  Running assignment stress test...", file=sys.stderr)
+    stress_test = compute_stress_test(portfolio_data, budget)
+
     return {
         "market_regime": market_regime,
         "earnings": earnings,
@@ -258,6 +171,7 @@ def run_preflight(portfolio_data: dict) -> dict:
         "budget": budget,
         "existing_options": existing,
         "cc_eligible": sorted(cc_eligible),
+        "stress_test": stress_test,
         "total_stocks": len(stock_symbols),
         "total_symbols_checked": len(all_symbols),
     }
@@ -272,12 +186,20 @@ def main():
                         help="Cash buffer to keep (default: $5,000)")
     args = parser.parse_args()
 
+    if args.buffer < 0:
+        parser.error("--buffer must be non-negative")
+
     # Read portfolio JSON from file or stdin
     if args.file:
+        if not os.path.exists(args.file):
+            parser.error(f"File not found: {args.file}")
         with open(args.file) as f:
             portfolio_data = json.load(f)
     else:
         portfolio_data = json.load(sys.stdin)
+
+    if "stock_positions" not in portfolio_data:
+        parser.error("Portfolio JSON missing 'stock_positions' key")
 
     result = run_preflight(portfolio_data)
     print(json.dumps(result, indent=2))

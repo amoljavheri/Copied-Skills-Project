@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import os
 
 # ── Delta ranges by trend class ──────────────────────────────────────────────
 # Format: {trend: {call: (min_delta, max_delta), put: (min_delta, max_delta)}}
@@ -31,7 +32,10 @@ LEGACY_PCT = {
 }
 
 
-def _enrich_option(o: dict, current_price: float, dte: int, cost_basis: float | None) -> dict:
+def _enrich_option(
+    o: dict, current_price: float, dte: int, cost_basis: float | None,
+    use_mid: bool = False,
+) -> dict:
     """Build an enriched strike dict from a raw Tradier option record."""
     g = o.get("greeks") or {}
     bid = o.get("bid", 0) or 0
@@ -41,8 +45,18 @@ def _enrich_option(o: dict, current_price: float, dte: int, cost_basis: float | 
     delta = round(g.get("delta", 0), 3)
     theta = round(g.get("theta", 0), 4)
     prob_profit = round((1 - abs(delta)) * 100, 1)
-    ann_yield = round((mid / o["strike"]) * (365 / max(dte, 1)) * 100, 1) if mid > 0 else 0.0
     otm_pct = round((o["strike"] / current_price - 1) * 100, 1)
+
+    # Yield price: use mid for tight spreads when --use-mid, else bid (conservative)
+    spread_pct_raw = round((ask - bid) / mid * 100, 1) if mid > 0 else 999.0
+    if use_mid and spread_pct_raw < 5.0 and mid > 0:
+        yield_price = mid
+    else:
+        yield_price = bid
+    if yield_price > 0:
+        ann_yield = round((yield_price / o["strike"]) * (365 / max(dte, 1)) * 100, 1)
+    else:
+        ann_yield = 0.0
 
     # ── Liquidity assessment ─────────────────────────────────────────────
     oi = o.get("open_interest", 0) or 0
@@ -96,6 +110,7 @@ def extract_strikes(
     cost_basis: float | None = None,
     min_premium: float = 0.0,
     min_ann_yield: float = 0.0,
+    use_mid: bool = False,
 ) -> dict:
     """
     Extract relevant strikes from a saved Tradier option chain JSON file.
@@ -112,7 +127,11 @@ def extract_strikes(
         delta_max:      Override maximum abs(delta) for strike selection
         cost_basis:     Cost basis per share (for flagging calls below cost)
         min_premium:    Minimum mid premium to include (default 0 = no filter)
+                        Dynamic floor: max(min_premium, price * 0.002) to avoid
+                        negligible premiums on expensive stocks.
         min_ann_yield:  Minimum annualized yield % to include (default 0)
+        use_mid:        When True and spread < 5%, use mid price for yield calc
+                        instead of bid. Better fill expectation on liquid options.
 
     Returns:
         Dict with "strikes" list and optional "action": "SKIP" if all filtered out.
@@ -147,9 +166,12 @@ def extract_strikes(
     # ── Step 2: Enrich with metrics ──────────────────────────────────────
     results = []
     for o in sorted(matches, key=lambda x: x["strike"]):
-        results.append(_enrich_option(o, current_price, dte, cost_basis))
+        results.append(_enrich_option(o, current_price, dte, cost_basis, use_mid=use_mid))
 
     # ── Step 3: Apply filters (skipped for custom_strikes) ─────────────
+    # Dynamic premium floor: scales with stock price to avoid negligible premiums
+    effective_min_premium = max(min_premium, current_price * 0.002)
+
     passed = []
     filtered = []
 
@@ -158,8 +180,8 @@ def extract_strikes(
     else:
         for r in results:
             reasons = []
-            if min_premium > 0 and r["mid"] < min_premium:
-                reasons.append(f"premium ${r['mid']:.2f} < ${min_premium:.2f}")
+            if effective_min_premium > 0 and r["mid"] < effective_min_premium:
+                reasons.append(f"premium ${r['mid']:.2f} < ${effective_min_premium:.2f}")
             if min_ann_yield > 0 and r["ann_yield_pct"] < min_ann_yield:
                 reasons.append(f"ann yield {r['ann_yield_pct']:.1f}% < {min_ann_yield:.1f}%")
             if not r["liquidity_pass"]:
@@ -262,8 +284,25 @@ def main():
                         help="Minimum mid premium to include (default: 0 = no filter)")
     parser.add_argument("--min-ann-yield", type=float, default=0.0,
                         help="Minimum annualized yield %% to include (default: 0)")
+    parser.add_argument("--use-mid", action="store_true",
+                        help="Use mid price for yield calc when spread < 5%% (default: bid)")
 
     args = parser.parse_args()
+
+    # Input validation
+    if args.price <= 0:
+        parser.error("--price must be positive")
+    if args.dte <= 0:
+        parser.error("--dte must be positive")
+    if args.delta_min is not None and args.delta_max is not None:
+        if args.delta_min >= args.delta_max:
+            parser.error("--delta-min must be less than --delta-max")
+    if args.min_premium < 0:
+        parser.error("--min-premium must be non-negative")
+    if args.min_ann_yield < 0:
+        parser.error("--min-ann-yield must be non-negative")
+    if not os.path.exists(args.file):
+        parser.error(f"File not found: {args.file}")
 
     custom = [float(s) for s in args.strikes.split(",")] if args.strikes else None
 
@@ -280,6 +319,7 @@ def main():
         cost_basis=args.cost_basis,
         min_premium=args.min_premium,
         min_ann_yield=args.min_ann_yield,
+        use_mid=args.use_mid,
     )
 
     output = {

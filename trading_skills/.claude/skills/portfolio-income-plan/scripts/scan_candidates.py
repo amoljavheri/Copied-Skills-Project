@@ -5,17 +5,25 @@
 
 import argparse
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
-import yfinance as yf
+# Shared utilities
+sys.path.insert(0, os.path.dirname(__file__))
+from shared_utils import (  # noqa: E402
+    classify_earnings_risk,
+    classify_trend,
+    compute_market_regime,
+    enforce_sector_limits,
+    enforce_sma200_cap,
+)
 
 from trading_skills.earnings import get_earnings_info
 from trading_skills.fundamentals import get_fundamentals
 from trading_skills.scanner_bullish import compute_bullish_score
 from trading_skills.scanner_pmcc import analyze_pmcc
-from trading_skills.technicals import compute_raw_indicators
 
 # ── S&P 100 universe ─────────────────────────────────────────────────────────
 SP100_UNIVERSE = [
@@ -45,100 +53,6 @@ SP100_UNIVERSE = [
     # Other
     "TSM", "BABA",
 ]
-
-# ── Market regime (top-down filter) ──────────────────────────────────────────
-def get_market_regime() -> dict:
-    """Fetch QQQ SMA200 and VXN to determine top-down market regime.
-
-    Used to apply a global delta adjustment on top of per-stock trend scores.
-    Backtest result: bear market (QQQ < SMA200) → CSP assignment rate 2.3× higher.
-    """
-    result = {
-        "qqq_above_sma200": None,
-        "qqq_price": None,
-        "qqq_sma200": None,
-        "vxn": None,
-        "regime": "unknown",          # "bull" | "bear" | "unknown"
-        "vxn_regime": "unknown",      # "normal" | "high" | "extreme" | "unknown"
-        "recommended_delta_tier": "standard",  # "standard" | "reduce" | "skip"
-        "regime_note": "",
-    }
-    try:
-        qqq = yf.Ticker("QQQ")
-        df = qqq.history(period="12mo")
-        if not df.empty and len(df) >= 200:
-            raw = compute_raw_indicators(df)
-            qqq_price = float(df["Close"].iloc[-1])
-            sma200 = raw.get("sma200")
-            result["qqq_price"] = round(qqq_price, 2)
-            if sma200 is not None:
-                result["qqq_sma200"] = round(sma200, 2)
-                above = qqq_price > sma200
-                result["qqq_above_sma200"] = above
-                pct = ((qqq_price - sma200) / sma200) * 100
-                result["regime"] = "bull" if above else "bear"
-                result["regime_note"] = (
-                    f"QQQ ${qqq_price:.2f} {'above' if above else 'BELOW'} "
-                    f"SMA200 ${sma200:.2f} ({pct:+.1f}%)"
-                )
-    except Exception:
-        pass
-
-    try:
-        vxn = yf.Ticker("^VXN")
-        vxn_df = vxn.history(period="5d")
-        if not vxn_df.empty:
-            vxn_val = float(vxn_df["Close"].iloc[-1])
-            result["vxn"] = round(vxn_val, 1)
-            if vxn_val >= 35:
-                result["vxn_regime"] = "extreme"
-            elif vxn_val >= 25:
-                result["vxn_regime"] = "high"
-            else:
-                result["vxn_regime"] = "normal"
-    except Exception:
-        pass
-
-    # Combine regime + VXN into a delta recommendation
-    regime = result["regime"]
-    vxn_regime = result["vxn_regime"]
-    if vxn_regime == "extreme":
-        result["recommended_delta_tier"] = "skip"
-        result["regime_note"] += " | VXN≥35 → SKIP new CSPs"
-    elif regime == "bear" or vxn_regime == "high":
-        result["recommended_delta_tier"] = "reduce"
-        result["regime_note"] += " | Bear/high-VXN → reduce delta one tier"
-    else:
-        result["recommended_delta_tier"] = "standard"
-
-    return result
-
-
-# ── Trend classification ──────────────────────────────────────────────────────
-def classify_trend(score: float) -> str:
-    if score >= 6.0:
-        return "strong_bull"
-    elif score >= 4.0:
-        return "bull"
-    elif score >= 2.0:
-        return "neutral"
-    elif score >= 1.0:
-        return "bear"
-    return "strong_bear"
-
-
-# ── Earnings risk classification ─────────────────────────────────────────────
-def classify_earnings_risk(days_away: int | None) -> str:
-    if days_away is None:
-        return "UNKNOWN"
-    if days_away <= 0:
-        return "PAST"
-    if days_away <= 14:
-        return "BLOCK"
-    if days_away <= 21:
-        return "SHORT_DTE_ONLY"
-    return "SAFE"
-
 
 # ── Wheel suitability score (0–10) ───────────────────────────────────────────
 def compute_wheel_score(
@@ -226,6 +140,8 @@ def analyze_symbol(
         trend_class = classify_trend(bullish_score)
         signals = bull_data.get("signals", []) if bull_data else []
         above_sma200 = bull_data.get("above_sma200") if bull_data else None
+        # SMA200 hard cap (Rule 13): prevent bullish trend on stocks below SMA200
+        trend_class = enforce_sma200_cap(trend_class, above_sma200)
 
         # IV via PMCC scanner (yfinance, no Tradier needed)
         pmcc_data = analyze_pmcc(symbol)
@@ -370,7 +286,7 @@ def scan_candidates(
 
     # ── Top-down market regime check (run before symbol scan) ────────────────
     print("  Checking market regime (QQQ SMA200 + VXN)...", file=sys.stderr)
-    market_regime = get_market_regime()
+    market_regime = compute_market_regime()
     regime_tier = market_regime.get("recommended_delta_tier", "standard")
     if regime_tier == "skip":
         print(
@@ -458,6 +374,9 @@ def scan_candidates(
     # Sort by wheel score descending, then alphabetically
     candidates.sort(key=lambda x: (-x["wheel_score"], x["symbol"]))
 
+    # Enforce sector concentration limits (30% max per sector)
+    candidates, dropped_for_concentration = enforce_sector_limits(candidates)
+
     # Optional Piotroski enrichment on top candidates
     if include_piotroski and candidates:
         from trading_skills.piotroski import calculate_piotroski_score
@@ -487,6 +406,11 @@ def scan_candidates(
         "owned_eligible_count": len(eligible_symbols),
         "candidate_count": len(candidates),
         "candidates": top_candidates,
+        "dropped_for_concentration": (
+            [{"symbol": d["symbol"], "sector": d.get("sector"), "reason": d.get("dropped_reason")}
+             for d in dropped_for_concentration]
+            if dropped_for_concentration else None
+        ),
         "owned_eligible": sorted(s["symbol"] for s in eligible_symbols),
         "errors": errors if errors else None,
     }
@@ -525,6 +449,15 @@ def main() -> None:
         help="Include Piotroski F-score for top candidates (slower)",
     )
     args = parser.parse_args()
+
+    if args.budget <= 0:
+        parser.error("--budget must be positive")
+    if args.market_cap_min <= 0:
+        parser.error("--market-cap-min must be positive")
+    if args.top_n <= 0:
+        parser.error("--top-n must be positive")
+    if not os.path.exists(args.portfolio):
+        parser.error(f"File not found: {args.portfolio}")
 
     with open(args.portfolio) as f:
         portfolio_data = json.load(f)

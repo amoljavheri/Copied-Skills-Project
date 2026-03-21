@@ -100,6 +100,57 @@ Use these results to drive ALL subsequent decisions:
 - Use trend class as `--trend` parameter in extract_strikes.py (SMA200 hard cap already applied)
 - Respect budget limits when selecting CSPs
 - Don't suggest strikes that duplicate existing options
+- Check `stress_test.stress_pass` — if False, reduce CSP exposure before adding new ones
+- Check sector concentration — no single sector should exceed 30% of total CSP capital
+
+### 🔴 Assignment Stress Test
+
+Preflight now includes a `stress_test` section that models simultaneous assignment of all open short puts:
+
+```json
+{
+  "stress_test": {
+    "total_assignment_capital": 85000,
+    "cash_available": 100000,
+    "shortfall": 0,
+    "coverage_pct": 117.6,
+    "stress_pass": true,
+    "recommendation": "OK — cash covers all simultaneous assignments"
+  }
+}
+```
+
+If `stress_pass` is **false**, the plan MUST flag this prominently and recommend reducing CSP exposure
+before adding new positions. A shortfall means a simultaneous assignment event could trigger margin calls.
+
+### 🏢 Sector Concentration Limits
+
+CSP candidates are now filtered so no single sector exceeds **30%** of total CSP capital:
+
+- Candidates sorted by wheel_score (strongest first)
+- First candidate per sector always passes
+- Subsequent candidates in the same sector are dropped if they'd breach the 30% cap
+- Dropped candidates appear in `dropped_for_concentration` in scan output
+
+This prevents correlated assignment clusters (e.g., NVDA + AMD + MRVL all assigned in a semiconductor selloff).
+
+### 🔄 Rolling Checks (Before New Trades)
+
+Run rolling checks before generating new recommendations:
+
+```bash
+uv run python .claude/skills/portfolio-income-plan/scripts/rolling_checks.py \
+  --portfolio sandbox/portfolio.json \
+  --prices sandbox/current_prices.json
+```
+
+Returns per-position recommendations:
+- **ROLL_EARLY**: 60%+ of premium captured → buy to close, re-sell new cycle
+- **ROLL_URGENT**: ITM with ≤7 DTE → roll out/up to avoid assignment
+- **ROLL_DECISION**: <5 DTE and within 2% of strike → decide: expire, roll, or close
+- **HOLD**: No action needed
+
+Display urgent/early positions at the top of the income plan report.
 
 ---
 
@@ -192,9 +243,10 @@ uv run python .claude/skills/portfolio-income-plan/scripts/extract_strikes.py \
 |-----------|---------|---------|
 | `--trend` | Per-stock trend from preflight (determines delta range) | Required |
 | `--cost-basis` | Flags CC strikes below cost basis | Optional |
-| `--min-premium` | Skips options with mid < threshold | 0.50 |
+| `--min-premium` | Skips options with mid < threshold (dynamic floor: `max(min_premium, price×0.002)`) | 0.50 |
 | `--min-ann-yield` | Skips options with annualized yield < threshold | 15 |
 | `--delta-min/max` | Override delta range directly | Auto from trend |
+| `--use-mid` | Use mid price for yield calc when spread < 5% (otherwise uses conservative bid) | Off |
 
 ### Delta-Based Strike Selection (replaces % OTM)
 
@@ -444,6 +496,10 @@ Options trading involves risk of loss. This is not financial advice.
 12. **Market regime first**: always check `market_regime` from preflight before selecting any CSP delta — backtest proves bear market doubles assignment risk
 13. **SMA200 hard cap**: per-stock trend is automatically capped at "neutral" (score ≤ 3.0) when stock is below its 200-day MA — prevents over-optimistic CSP entry on bear bounces
 14. **VXN ≥ 35**: skip ALL new CSPs regardless of individual stock trends — extreme volatility clusters create multi-week assignment streaks
+15. **Sector concentration**: no single sector may exceed 30% of total CSP capital — prevents correlated assignment clusters
+16. **Stress test**: before adding new CSPs, verify `stress_test.stress_pass` is true — if false, reduce exposure first
+17. **Dynamic premium floor**: min premium scales with stock price (`max(min_premium, price×0.002)`) — prevents negligible premiums on expensive stocks
+18. **Rolling checks**: check existing positions for roll opportunities (60% profit, ITM near expiry) BEFORE generating new trades
 
 ---
 

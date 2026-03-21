@@ -271,6 +271,83 @@ class TestLegacyFallback:
         assert len(strikes) > 0
 
 
+class TestDynamicPremiumThreshold:
+    """Test dynamic premium floor that scales with stock price."""
+
+    def test_expensive_stock_higher_floor(self, tmp_path):
+        """For a $500 stock, dynamic floor = max(0.50, 500*0.002) = $1.00."""
+        options = [
+            _make_option(510, "call", 0.70, 0.90, 0.30, oi=500),  # mid=0.80 < $1.00
+            _make_option(520, "call", 1.50, 1.60, 0.25, oi=500),   # mid=1.55 > $1.00
+        ]
+        filepath = _make_chain_file(options, tmp_path)
+
+        result = extract_strikes(filepath, current_price=500.0, option_type="call",
+                                 trend="neutral", dte=30, min_premium=0.50)
+
+        assert result["action"] == "TRADE"
+        strikes = [s["strike"] for s in result["strikes"]]
+        assert 520 in strikes
+        assert 510 not in strikes  # filtered by dynamic floor
+
+    def test_cheap_stock_uses_explicit_min(self, tmp_path):
+        """For a $20 stock, dynamic floor = max(0.50, 20*0.002) = $0.50 (explicit wins)."""
+        options = [
+            _make_option(21, "call", 0.40, 0.50, 0.30, oi=500),   # mid=0.45 < $0.50
+            _make_option(22, "call", 0.60, 0.65, 0.25, oi=500),   # mid=0.625 > $0.50
+        ]
+        filepath = _make_chain_file(options, tmp_path)
+
+        result = extract_strikes(filepath, current_price=20.0, option_type="call",
+                                 trend="neutral", dte=30, min_premium=0.50)
+
+        assert result["action"] == "TRADE"
+        strikes = [s["strike"] for s in result["strikes"]]
+        assert 22 in strikes
+        assert 21 not in strikes
+
+
+class TestUseMidPrice:
+    """Test --use-mid flag for yield calculation on liquid options."""
+
+    def test_use_mid_tight_spread(self, tmp_path):
+        """With use_mid=True and tight spread (<5%), yield uses mid."""
+        options = [
+            _make_option(185, "call", 2.00, 2.08, 0.30, oi=5000),  # spread ~3.9%
+        ]
+        filepath = _make_chain_file(options, tmp_path)
+
+        result_bid = extract_strikes(filepath, current_price=180.0, option_type="call",
+                                     trend="neutral", dte=30, use_mid=False)
+        result_mid = extract_strikes(filepath, current_price=180.0, option_type="call",
+                                     trend="neutral", dte=30, use_mid=True)
+
+        bid_yield = result_bid["strikes"][0]["ann_yield_pct"]
+        mid_yield = result_mid["strikes"][0]["ann_yield_pct"]
+        # Mid yield should be higher than bid yield
+        assert mid_yield > bid_yield
+
+    def test_use_mid_wide_spread_falls_back_to_bid(self, tmp_path):
+        """With use_mid=True but wide spread (>5%), yield falls back to bid."""
+        # Spread = (2.30-2.00)/2.15 = ~14% — passes liquidity (<=15%) but > 5% threshold
+        options = [
+            _make_option(185, "call", 2.00, 2.30, 0.30, oi=5000),
+        ]
+        filepath = _make_chain_file(options, tmp_path)
+
+        result_bid = extract_strikes(filepath, current_price=180.0, option_type="call",
+                                     trend="neutral", dte=30, use_mid=False)
+        result_mid = extract_strikes(filepath, current_price=180.0, option_type="call",
+                                     trend="neutral", dte=30, use_mid=True)
+
+        # Wide spread → both should use bid → same yield
+        assert result_bid["action"] == "TRADE"
+        assert result_mid["action"] == "TRADE"
+        bid_yield = result_bid["strikes"][0]["ann_yield_pct"]
+        mid_yield = result_mid["strikes"][0]["ann_yield_pct"]
+        assert bid_yield == mid_yield
+
+
 class TestOutputFields:
     """Test that output includes all expected fields."""
 
