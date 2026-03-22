@@ -165,7 +165,8 @@ class TestDecideAction(TestCase):
 
     def test_profit_below_threshold_hold(self):
         cl = self._classify()
-        opt = _make_option(cost_basis=5000, current_value=4000)
+        # cost_basis $10/share, per_now=4000/5/100=$8 → profit=20% < 50% → HOLD
+        opt = _make_option(cost_basis=10.0, current_value=4000)
         r = decide_action(cl, opt, 250.0, close_cost=8.00)
         self.assertEqual(r["action"], "HOLD")
 
@@ -267,9 +268,9 @@ class TestDecideAction(TestCase):
 
     def test_premium_erosion_flagged(self):
         cl = self._classify(dte=30, moneyness="OTM")
-        # cost_basis $50 for strike $250, 5 contracts
-        # premium_ratio = 50 / (250*100*5) = 0.0004 < 0.005
-        opt = _make_option(cost_basis=50, current_value=10)
+        # cost_basis $1/share (per-share), 5 contracts, strike $250
+        # total_premium = 1.0*100*5=500, capital=125000, ratio=0.4% < 0.5% → flagged
+        opt = _make_option(cost_basis=1.0, current_value=10)
         r = decide_action(cl, opt, 250.0)
         self.assertTrue(r["consider_exit"])
         self.assertIn("rolled repeatedly", r["exit_reason"])

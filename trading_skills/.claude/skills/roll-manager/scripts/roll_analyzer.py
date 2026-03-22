@@ -179,8 +179,10 @@ def decide_action(
     # ── Pre-check: Premium erosion detection ──────────────────────────────
     cost_basis = abs(option.get("cost_basis", 0))
     capital_at_risk = strike * 100 * contracts
-    if cost_basis > 0 and capital_at_risk > 0:
-        premium_ratio = cost_basis / capital_at_risk
+    # cost_basis is per-share from parse_etrade; total = cost_basis * 100 * contracts
+    total_premium = cost_basis * 100 * contracts
+    if total_premium > 0 and capital_at_risk > 0:
+        premium_ratio = total_premium / capital_at_risk
         if premium_ratio < PREMIUM_EROSION_PCT:
             consider_exit = True
             exit_reason = (
@@ -189,10 +191,12 @@ def decide_action(
             )
 
     # ── Profit calculation ────────────────────────────────────────────────
+    # cost_basis from parse_etrade is already per-share premium received
+    # current_value from parse_etrade is total position value in dollars
     current_value = abs(option.get("current_value", 0))
     if cost_basis > 0 and current_value > 0:
-        per_sold = cost_basis / contracts / 100
-        per_now = current_value / contracts / 100
+        per_sold = cost_basis                          # already per-share
+        per_now = current_value / contracts / 100      # total → per-share
         if per_sold > 0:
             profit_captured_pct = round(
                 (per_sold - per_now) / per_sold * 100, 1
@@ -218,7 +222,8 @@ def decide_action(
     # Rule 1: Profit capture with theta guard
     if profit_captured_pct is not None and profit_captured_pct >= profit_target:
         # V3 theta guard: if option is nearly worthless, just let it expire
-        cost_basis_per = cost_basis / max(contracts, 1) / 100
+        # cost_basis is already per-share from parse_etrade output
+        cost_basis_per = cost_basis
         if (
             close_cost is not None
             and cost_basis_per > 0
@@ -838,7 +843,18 @@ def analyze_rolls(
         if current_price <= 0:
             continue
 
-        # Step 1: Classify
+        # Step 1: Enrich option with greeks from current-expiry chain, then classify
+        opt_expiry = opt.get("expiry", "")
+        opt_strike = opt.get("strike", 0)
+        opt_type = opt.get("option_type", "")
+        if symbol in all_chains and opt_expiry in all_chains[symbol]:
+            for chain_opt in all_chains[symbol][opt_expiry]:
+                if (
+                    chain_opt.get("strike") == opt_strike
+                    and chain_opt.get("option_type") == opt_type
+                ):
+                    opt = {**opt, "greeks": chain_opt.get("greeks", {})}
+                    break
         classification = classify_position(opt, current_price, stock_positions)
 
         # Step 2: Estimate close cost
