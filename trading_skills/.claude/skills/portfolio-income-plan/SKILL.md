@@ -5,7 +5,8 @@ description: >
   Reads the latest CSV from the Etrade Files folder, identifies all stock positions
   and existing option positions, fetches LIVE option chain prices via Tradier MCP,
   and produces a week-by-week covered call (CC) and cash secured put (CSP) income
-  plan with real bid/ask premiums, annualized yields, and earnings conflict warnings.
+  plan with real bid/ask premiums, annualized yields, earnings conflict warnings,
+  and new large-cap candidate recommendations (CSP-first wheel opportunities).
   Use this skill whenever the user asks for: "income plan", "weekly options plan",
   "what covered calls should I sell", "portfolio income strategy", "4-week plan",
   "what options can I sell on my portfolio", "generate income from my stocks",
@@ -154,10 +155,11 @@ Display urgent/early positions at the top of the income plan report.
 
 ---
 
-## Step 2.6: Scan for New Portfolio Candidates (Optional)
+## Step 2.6: Scan for New Portfolio Candidates (REQUIRED)
 
 Run **after** preflight checks to find large-cap stocks (>$200B market cap) worth adding
-to the portfolio via the wheel strategy (CSP-first entry).
+to the portfolio via the wheel strategy (CSP-first entry). This step is **required** and
+must be included in every income plan report.
 
 ```bash
 uv run python .claude/skills/portfolio-income-plan/scripts/scan_candidates.py \
@@ -457,9 +459,10 @@ Output a structured markdown report saved to:
 - MSTR: Apr 30 — close all options by Apr 24!
 - TEM: May 1 — short expiry only
 
-## 💡 New Position Opportunities (Large-Cap >$200B)
+## 💡 New Position Opportunities (Large-Cap >$200B) — REQUIRED SECTION
 
-From scan_candidates.py — stocks worth adding via CSP-first wheel strategy.
+Results from `scan_candidates.py` (Step 2.6) — stocks worth adding via CSP-first wheel strategy.
+This section is **required in every report**.
 
 ### New Candidates
 | Symbol | Sector | Price | Trend | IV | Earnings | Score | Rec | CSP Strike | Capital |
@@ -500,6 +503,7 @@ Options trading involves risk of loss. This is not financial advice.
 16. **Stress test**: before adding new CSPs, verify `stress_test.stress_pass` is true — if false, reduce exposure first
 17. **Dynamic premium floor**: min premium scales with stock price (`max(min_premium, price×0.002)`) — prevents negligible premiums on expensive stocks
 18. **Rolling checks**: check existing positions for roll opportunities (60% profit, ITM near expiry) BEFORE generating new trades
+19. **Scan for candidates**: REQUIRED — always run `scan_candidates.py` after preflight and include "💡 New Position Opportunities" section in report (no exceptions for "optional")
 
 ---
 
