@@ -502,8 +502,9 @@ Options trading involves risk of loss. This is not financial advice.
 15. **Sector concentration**: no single sector may exceed 30% of total CSP capital — prevents correlated assignment clusters
 16. **Stress test**: before adding new CSPs, verify `stress_test.stress_pass` is true — if false, reduce exposure first
 17. **Dynamic premium floor**: min premium scales with stock price (`max(min_premium, price×0.002)`) — prevents negligible premiums on expensive stocks
-18. **Rolling checks**: check existing positions for roll opportunities (60% profit, ITM near expiry) BEFORE generating new trades
+18. **Rolling checks**: check existing positions for roll opportunities (60% profit, ITM near expiry) BEFORE generating new trades. NOTE: `cost_basis` from parse_etrade.py is stored as **per-share price** (e.g. 1.22 = $1.22/share) while `current_value` is the **total dollar value** of the position (e.g. −32.5 = $32.50 total for one contract). Do NOT divide `cost_basis` by 100 — it is already per-share.
 19. **Scan for candidates**: REQUIRED — always run `scan_candidates.py` after preflight and include "💡 New Position Opportunities" section in report (no exceptions for "optional")
+20. **Short-term momentum override**: `check_recent_momentum()` runs on every candidate and every portfolio stock. If 5-day return ≤ −3% AND ≥ 3 consecutive red days → downgrade trend one tier and subtract 1.0 from wheel score. If 5-day return ≤ −5% AND ≥ 5 consecutive red days → force trend to 'bear', cap wheel score at 3.9 (auto-SKIP). This catches sharp recent drops that 20/50/200-day SMA scoring smooths over (e.g. KO −4.1% over 5 days was scored 'neutral' without this rule).
 
 ---
 

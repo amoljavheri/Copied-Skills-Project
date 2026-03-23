@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 # Shared utilities (classify_trend, market regime, etc.)
 sys.path.insert(0, os.path.dirname(__file__))
 from shared_utils import (  # noqa: E402
+    apply_momentum_downgrade,
+    check_recent_momentum,
     classify_trend,
     compute_market_regime,
     compute_stress_test,
@@ -81,11 +83,20 @@ def check_trends(symbols: list[str]) -> dict:
                 trend_class = classify_trend(score)
                 # SMA200 hard cap (Rule 13): prevent bullish trend on stocks below SMA200
                 trend_class = enforce_sma200_cap(trend_class, above_sma200)
+                # Short-term momentum override (Rule 20)
+                momentum = check_recent_momentum(sym)
+                trend_class = apply_momentum_downgrade(trend_class, momentum)
+                signals = data.get("signals", [])
+                if momentum.get("warning"):
+                    signals = signals + [f"⚡ {momentum['warning']}"]
                 results[sym] = {
                     "score": round(score, 1),
                     "class": trend_class,
                     "above_sma200": above_sma200,
-                    "signals": data.get("signals", []),
+                    "momentum_class": momentum.get("momentum_class", "neutral"),
+                    "momentum_5d_return_pct": momentum.get("five_day_return_pct"),
+                    "momentum_consecutive_reds": momentum.get("consecutive_reds", 0),
+                    "signals": signals,
                 }
             else:
                 results[sym] = {"score": 0.0, "class": "neutral", "signals": []}

@@ -98,7 +98,15 @@
       "Bash(done)",
       "mcp__61adfe15-70ba-4e95-8525-09f2b5b94fe1__get_historical_data",
       "Bash(__NEW_LINE_583e457e9be1565b__ echo:*)",
-      "Bash(__NEW_LINE_3e5f09ac444343ce__ echo:*)"
+      "Bash(__NEW_LINE_3e5f09ac444343ce__ echo:*)",
+      "mcp__scheduled-tasks__list_scheduled_tasks",
+      "Bash(ls -la \"C:/Users/amolj/Downloads/PortfolioDownload.csv\" \"C:/Users/amolj/Downloads/PortfolioDownload \\(1\\).csv\" \"C:/Users/amolj/Downloads/PortfolioDownload \\(2\\).csv\")",
+      "Bash(grep -r trading-skills-mcp 'C:\\\\Claude Projects\\\\Copied Skills Project\\\\trading_skills' --include=*.py --include=*.toml --include=*.cfg)",
+      "mcp__finnhub-mcp__GetCompanyProfile",
+      "Skill(remember:remember)",
+      "Skill(remember:remember:*)",
+      "Bash(cp \"C:/Users/amolj/.claude/projects/C--Claude-Projects-Copied-Skills-Project/25522bac-699b-49f7-af11-e5df22ee7430/tool-results/mcp-61adfe15-70ba-4e95-8525-09f2b5b94fe1-get_options_chain-1774286827675.txt\" \"C:/Claude Projects/Copied Skills Project/trading_skills/sandbox/chains/TEM_2026-04-24.json\")",
+      "Bash(cp \"C:/Users/amolj/.claude/projects/C--Claude-Projects-Copied-Skills-Project/25522bac-699b-49f7-af11-e5df22ee7430/tool-results/toolu_01EMekDkRPiq2cRCVzo3czSY.json\" \"C:/Claude Projects/Copied Skills Project/trading_skills/sandbox/chains/TEM_2027-01-15.json\")"
     ]
   }
 }

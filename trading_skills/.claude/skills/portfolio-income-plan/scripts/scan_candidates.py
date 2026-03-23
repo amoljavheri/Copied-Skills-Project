@@ -13,6 +13,8 @@ from datetime import datetime
 # Shared utilities
 sys.path.insert(0, os.path.dirname(__file__))
 from shared_utils import (  # noqa: E402
+    apply_momentum_downgrade,
+    check_recent_momentum,
     classify_earnings_risk,
     classify_trend,
     compute_market_regime,
@@ -61,6 +63,7 @@ def compute_wheel_score(
     earnings_days: int | None,
     csp_affordable: bool,
     profit_margin: float | None,
+    momentum: dict | None = None,
 ) -> float:
     score = 0.0
 
@@ -73,6 +76,16 @@ def compute_wheel_score(
         "strong_bear": 0.0,
     }
     score += trend_points.get(trend_class, 0.0)
+
+    # Momentum penalty (Rule 20): short-term bearish momentum reduces score
+    if momentum:
+        mc = momentum.get("momentum_class", "neutral")
+        if mc == "strong_bearish":
+            score -= 2.0   # hard block: kills almost any ADD recommendation
+        elif mc == "bearish":
+            score -= 1.0   # drops WATCH→SKIP or ADD→WATCH
+        elif mc == "mild_bearish":
+            score -= 0.5   # minor caution flag
 
     # IV quality component (0–3)
     if iv_pct is not None:
@@ -143,6 +156,13 @@ def analyze_symbol(
         # SMA200 hard cap (Rule 13): prevent bullish trend on stocks below SMA200
         trend_class = enforce_sma200_cap(trend_class, above_sma200)
 
+        # Short-term momentum override (Rule 20): detect sharp recent drops missed by
+        # long-term SMA scoring. E.g. 5 consecutive red days / -4% week → downgrade trend.
+        momentum = check_recent_momentum(symbol)
+        trend_class = apply_momentum_downgrade(trend_class, momentum)
+        if momentum.get("warning"):
+            signals.append(f"⚡ {momentum['warning']}")
+
         # IV via PMCC scanner (yfinance, no Tradier needed)
         pmcc_data = analyze_pmcc(symbol)
         iv_pct = pmcc_data.get("iv_pct") if pmcc_data else None
@@ -162,10 +182,13 @@ def analyze_symbol(
         csp_capital = round(price * 100, 0) if price else None
         csp_affordable = bool(csp_capital and csp_capital <= budget)
 
-        # Wheel score
+        # Wheel score — include momentum penalty
         wheel_score = compute_wheel_score(
-            trend_class, iv_pct, earnings_days, csp_affordable, profit_margin
+            trend_class, iv_pct, earnings_days, csp_affordable, profit_margin, momentum
         )
+        # Hard block: momentum override forces SKIP regardless of other scores
+        if momentum.get("should_block"):
+            wheel_score = min(wheel_score, 3.9)  # cap below WATCH threshold
 
         # Candidate type
         shares_owned = owned_positions.get(symbol, 0)
@@ -235,6 +258,10 @@ def analyze_symbol(
             "trend_class": trend_class,
             "bullish_score": round(bullish_score, 1),
             "above_sma200": above_sma200,
+            "momentum_class": momentum.get("momentum_class", "neutral"),
+            "momentum_5d_return_pct": momentum.get("five_day_return_pct"),
+            "momentum_consecutive_reds": momentum.get("consecutive_reds", 0),
+            "momentum_warning": momentum.get("warning"),
             "signals": signals,
             "iv_pct": iv_pct,
             "earnings_date": earnings_date,

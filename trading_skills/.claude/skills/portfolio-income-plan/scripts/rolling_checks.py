@@ -53,14 +53,16 @@ def check_rolling(
         urgency = 0  # 0=low, 1=medium, 2=high
 
         # Check 1: Profit target (60% of premium captured)
-        # Cost basis = what we received when selling (positive number)
-        cost_basis_total = abs(opt.get("cost_basis", 0))
-        current_value = abs(opt.get("current_value", 0))
-        if cost_basis_total > 0 and current_value > 0:
+        # cost_basis from parse_etrade.py = per-share price received (e.g. 1.22 = $1.22/share)
+        # current_value from parse_etrade.py = TOTAL dollar value of position (e.g. -32.5 = $32.50 total)
+        # Units DIFFER — must not divide cost_basis by 100 again.
+        cost_basis_per_share = abs(opt.get("cost_basis", 0))   # already per-share
+        current_value = abs(opt.get("current_value", 0))        # total dollars
+        if cost_basis_per_share > 0 and current_value > 0:
             # Profit = what we sold for - what it costs to close
-            per_contract_sold = cost_basis_total / contracts / 100
-            per_contract_now = current_value / contracts / 100
-            if per_contract_sold > 0:
+            per_contract_sold = cost_basis_per_share             # per-share price received
+            per_contract_now = current_value / contracts / 100   # total -> per-share
+            if per_contract_sold > 0 and per_contract_now < per_contract_sold:
                 profit_pct = ((per_contract_sold - per_contract_now) / per_contract_sold) * 100
                 if profit_pct >= 60:
                     action = "ROLL_EARLY"

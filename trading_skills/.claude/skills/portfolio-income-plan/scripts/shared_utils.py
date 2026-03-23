@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # ABOUTME: Shared utility functions for portfolio income plan scripts.
-# ABOUTME: Contains classify_trend, classify_earnings_risk, and market regime logic
-# ABOUTME: used by both preflight_checks.py and scan_candidates.py.
+# ABOUTME: Contains classify_trend, classify_earnings_risk, market regime logic,
+# ABOUTME: and short-term momentum override used by preflight_checks.py and scan_candidates.py.
 
 import yfinance as yf
 
 from trading_skills.technicals import compute_raw_indicators
+
+# Tier order used by momentum downgrade
+_TREND_TIERS = ["strong_bull", "bull", "neutral", "bear", "strong_bear"]
 
 
 def classify_trend(score: float) -> str:
@@ -36,6 +39,96 @@ def classify_earnings_risk(days_away: int | None) -> str:
     if days_away <= 21:
         return "SHORT_DTE_ONLY"
     return "SAFE"
+
+
+def check_recent_momentum(symbol: str) -> dict:
+    """Detect short-term bearish momentum missed by long-term trend scoring.
+
+    Uses last 10 trading days to compute 5-day return and consecutive red-day count.
+    This catches sharp recent drops (like KO -4.1% over 5 days) that a 20/50/200-day
+    SMA-based score smooths over.
+
+    Thresholds (Rule 20):
+      - strong_bearish : 5d_ret <= -5%  AND consec_reds >= 5  → block CSP, force 'bear'
+      - bearish        : 5d_ret <= -3%  AND consec_reds >= 3  → downgrade one tier
+      - mild_bearish   : consec_reds >= 3  (any magnitude)    → warning only, no downgrade
+      - neutral        : no override
+
+    Returns dict with momentum_class, 5d_return_pct, consecutive_reds, warning.
+    """
+    result = {
+        "momentum_class": "neutral",
+        "five_day_return_pct": None,
+        "consecutive_reds": 0,
+        "warning": None,
+        "should_block": False,
+    }
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="15d")
+        if hist.empty or len(hist) < 6:
+            return result
+
+        closes = list(hist["Close"])
+        five_day_ret = (closes[-1] - closes[-6]) / closes[-6] * 100
+        result["five_day_return_pct"] = round(five_day_ret, 2)
+
+        # Count consecutive red days from the most recent close backwards
+        reds = 0
+        for i in range(len(closes) - 1, 0, -1):
+            if closes[i] < closes[i - 1]:
+                reds += 1
+            else:
+                break
+        result["consecutive_reds"] = reds
+
+        if five_day_ret <= -5.0 and reds >= 5:
+            result["momentum_class"] = "strong_bearish"
+            result["should_block"] = True
+            result["warning"] = (
+                f"MOMENTUM BLOCK: {five_day_ret:.1f}% in 5d, {reds} consecutive red days — "
+                "forced to 'bear', skip CSP until stabilisation"
+            )
+        elif five_day_ret <= -3.0 and reds >= 3:
+            result["momentum_class"] = "bearish"
+            result["warning"] = (
+                f"Momentum bearish: {five_day_ret:.1f}% in 5d, {reds} consecutive red days — "
+                "trend downgraded one tier"
+            )
+        elif reds >= 3:
+            result["momentum_class"] = "mild_bearish"
+            result["warning"] = (
+                f"Mild bearish momentum: {reds} consecutive red days — monitor closely"
+            )
+    except Exception:
+        pass
+
+    return result
+
+
+def apply_momentum_downgrade(trend_class: str, momentum: dict) -> str:
+    """Downgrade long-term trend class based on recent 5-day momentum (Rule 20).
+
+    strong_bearish → force at least 'bear' (or keep 'strong_bear' if already there)
+    bearish        → drop one tier (e.g. neutral → bear, bull → neutral)
+    mild_bearish   → no change (warning only)
+    neutral        → no change
+    """
+    mc = momentum.get("momentum_class", "neutral")
+    if mc not in ("strong_bearish", "bearish"):
+        return trend_class
+
+    try:
+        idx = _TREND_TIERS.index(trend_class)
+    except ValueError:
+        return trend_class
+
+    if mc == "strong_bearish":
+        # Force at minimum 'bear' (index 3)
+        return _TREND_TIERS[max(idx, 3)]
+    else:
+        # Drop one tier, cap at strong_bear
+        return _TREND_TIERS[min(idx + 1, len(_TREND_TIERS) - 1)]
 
 
 def enforce_sma200_cap(trend_class: str, above_sma200: bool | None) -> str:
