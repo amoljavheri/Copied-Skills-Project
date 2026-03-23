@@ -191,11 +191,12 @@ def decide_action(
             )
 
     # ── Profit calculation ────────────────────────────────────────────────
-    # cost_basis from parse_etrade is already per-share premium received
+    # cost_basis from parse_etrade is cost_basis_total = per_share_premium * contracts
+    # (e.g. sold 2 contracts at $0.63/share → cost_basis = 1.26, not 0.63)
     # current_value from parse_etrade is total position value in dollars
     current_value = abs(option.get("current_value", 0))
     if cost_basis > 0 and current_value > 0:
-        per_sold = cost_basis                          # already per-share
+        per_sold = cost_basis / contracts              # total → per-share per-contract
         per_now = current_value / contracts / 100      # total → per-share
         if per_sold > 0:
             profit_captured_pct = round(
