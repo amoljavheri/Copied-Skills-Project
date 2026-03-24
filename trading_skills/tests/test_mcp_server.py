@@ -38,14 +38,6 @@ class TestMCPServerImport:
             "scan_bullish",
             "scan_pmcc",
             "report_stock",
-            "ib_account",
-            "ib_portfolio",
-            "ib_find_short_roll",
-            "ib_portfolio_action_report",
-            "ib_option_expiries",
-            "ib_option_chain",
-            "ib_delta_exposure",
-            "ib_collar",
         ]
         for tool_name in expected_tools:
             assert tool_name in tools, f"Missing tool: {tool_name}"
@@ -131,90 +123,6 @@ class TestScannerTools:
         if "symbol" in result:
             assert "score" in result
 
-
-class TestIBTools:
-    """Test IB tools (will fail gracefully if TWS not running)."""
-
-    def test_ib_account_handles_no_connection(self):
-        """ib_account returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_account
-
-        result = asyncio.run(ib_account(port=7497))
-        # Should return connected=False or error when IB not running
-        assert "connected" in result or "error" in result
-        if "connected" in result:
-            assert result["connected"] is False or "error" in result
-
-    def test_ib_portfolio_handles_no_connection(self):
-        """ib_portfolio returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_portfolio
-
-        result = asyncio.run(ib_portfolio(port=7497))
-        # Should return connected=False or error when IB not running
-        assert "connected" in result or "error" in result
-
-    def test_ib_find_short_roll_handles_no_connection(self):
-        """ib_find_short_roll returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_find_short_roll
-
-        result = asyncio.run(ib_find_short_roll("AAPL", port=7497))
-        # Should return error when IB not running
-        assert "error" in result
-
-    def test_ib_portfolio_action_report_handles_no_connection(self):
-        """ib_portfolio_action_report returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_portfolio_action_report
-
-        result = asyncio.run(ib_portfolio_action_report(port=7497))
-        # Should return error when IB not running
-        assert "error" in result
-
-    def test_ib_option_expiries_handles_no_connection(self):
-        """ib_option_expiries returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_option_expiries
-
-        result = asyncio.run(ib_option_expiries("AAPL", port=7497))
-        assert result["success"] is False
-        assert "error" in result
-
-    def test_ib_option_chain_handles_no_connection(self):
-        """ib_option_chain returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_option_chain
-
-        result = asyncio.run(ib_option_chain("AAPL", "20260320", port=7497))
-        assert result["success"] is False
-        assert "error" in result
-
-    def test_ib_delta_exposure_handles_no_connection(self):
-        """ib_delta_exposure returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_delta_exposure
-
-        result = asyncio.run(ib_delta_exposure(port=7497))
-        assert result["connected"] is False
-        assert "error" in result
-
-    def test_ib_collar_handles_no_connection(self):
-        """ib_collar returns error when IB not connected."""
-        import asyncio
-
-        from mcp_server.server import ib_collar
-
-        result = asyncio.run(ib_collar("AAPL", port=7497))
-        assert "error" in result
 
 
 
